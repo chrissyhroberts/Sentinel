@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: methodmesh-sentinel-reconciliation
+Version: 0.1.0
+Summary: Deterministic MethodMesh credential registry reconciliation for Sentinel
+Requires-Python: >=3.11

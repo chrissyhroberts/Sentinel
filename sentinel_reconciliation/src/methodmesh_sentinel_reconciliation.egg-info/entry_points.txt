@@ -1,0 +1,2 @@
+[console_scripts]
+sentinel-reconcile-credentials = methodmesh_sentinel_reconciliation.cli:main

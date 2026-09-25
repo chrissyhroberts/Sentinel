@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "methodmesh-sentinel-reconciliation"
+version = "0.1.0"
+description = "Deterministic MethodMesh credential registry reconciliation for Sentinel"
+requires-python = ">=3.11"
+
+[project.scripts]
+sentinel-reconcile-credentials = "methodmesh_sentinel_reconciliation.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

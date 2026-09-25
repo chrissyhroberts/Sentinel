@@ -1,0 +1,2 @@
+issuer_public_key_fingerprint_sha256,issuer_key_id,device_label,site_id,status,commissioned_at_iso,retired_at_iso,revoked_at_iso,notes
+0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef,0123456789abcdef,Example provisioning phone,SITE_A,active,2026-01-01T00:00:00Z,,,Replace this example with governed Sidecar-derived data

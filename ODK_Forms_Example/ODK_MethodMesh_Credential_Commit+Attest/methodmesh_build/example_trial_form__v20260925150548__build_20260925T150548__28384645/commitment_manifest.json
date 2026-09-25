@@ -1,0 +1,264 @@
+{
+  "schema": "methodmesh.xlsform_commitment_manifest.v2",
+  "bundle_schema": "methodmesh.xlsform_release_bundle.v1",
+  "bundle": {
+    "build_id": "example_trial_form__v20260925150548__build_20260925T150548__28384645",
+    "folder_name": "example_trial_form__v20260925150548__build_20260925T150548__28384645",
+    "contents": {
+      "source": "SOURCE__ordinary_trial_form.xlsx",
+      "release_xlsform": "example_trial_form__v20260925150548__methodmesh.xlsx",
+      "machine_manifest": "commitment_manifest.json",
+      "human_manifest": "MANIFEST.md",
+      "build_report": "BUILD_REPORT.md",
+      "checksums": "CHECKSUMS.sha256",
+      "sentinel_task_event": "sentinel_task_event.json"
+    },
+    "previous_release_overwrite": false
+  },
+  "compiler": {
+    "name": "methodmesh-xlsform",
+    "version": "0.4.0",
+    "implementation_sha256": "1d2cdb02a9178ff0c1f1560555932c45d0a03029396664c9a3c5c22e5dd3cfb9"
+  },
+  "source": {
+    "filename": "ordinary_trial_form.xlsx",
+    "preserved_filename": "SOURCE__ordinary_trial_form.xlsx",
+    "sha256": "283846450ab2dda84c769e6fd99509389dd012aed35e5c0643243c132331d76c",
+    "authoring_version": "2026092201"
+  },
+  "build": {
+    "compiled_at_local": "2026-09-25T15:05:48+01:00",
+    "release_version_format": "YYYYMMDDHHMMSS",
+    "build_folder_timestamp_format": "YYYYMMDDTHHMMSS"
+  },
+  "form": {
+    "form_title": "Example ordinary trial form",
+    "description": "Example ordinary trial form",
+    "form_id": "example_trial_form",
+    "version": "20260925150548",
+    "study_id": "EXAMPLE_STUDY"
+  },
+  "methodmesh": {
+    "authentication": "nfc_credential",
+    "timestamp_policy": "preferred",
+    "auth_method": "nfc_credential_verification",
+    "attestation_method": "attestation.create",
+    "field_authentication_mode": "cryptographic_credential_evidence",
+    "study_authorisation_mode": "central_reconciliation",
+    "issuer_allow_list_required_on_field_device": false,
+    "attestation_bound_authentication_evidence": [
+      "credential_id_sha256",
+      "credential_subject_id_sha256",
+      "issuer_public_key_fingerprint_sha256",
+      "verification_evidence_hash"
+    ],
+    "return_namespaces": [
+      "mm_auth",
+      "mm_att"
+    ]
+  },
+  "commitment": {
+    "recipe": {
+      "schema": "methodmesh.commitment_recipe.v1",
+      "canonicalization": "ordered-kv-v1",
+      "hash_algorithm": "SHA-256",
+      "encoding": "UTF-8",
+      "pair_separator": "|",
+      "key_value_separator": "=",
+      "escaping": "none",
+      "members": [
+        {
+          "path": "study_id",
+          "type": "string",
+          "commitment": "value",
+          "transform": "safe-token"
+        },
+        {
+          "path": "form_id",
+          "type": "string",
+          "commitment": "value",
+          "transform": "safe-token"
+        },
+        {
+          "path": "form_version",
+          "type": "string",
+          "commitment": "value",
+          "transform": "safe-token"
+        },
+        {
+          "path": "workflow_instance_id",
+          "type": "string",
+          "commitment": "value",
+          "transform": "uuid"
+        },
+        {
+          "path": "credential_id_sha256",
+          "type": "sha256",
+          "commitment": "text-utf8-sha256",
+          "source_field": "mm_auth_credential_id"
+        },
+        {
+          "path": "credential_subject_id_sha256",
+          "type": "sha256",
+          "commitment": "text-utf8-sha256",
+          "source_field": "mm_auth_credential_subject_id"
+        },
+        {
+          "path": "issuer_public_key_fingerprint_sha256",
+          "type": "sha256",
+          "commitment": "value",
+          "transform": "lowercase-hex",
+          "source_field": "mm_auth_issuer_public_key_fingerprint_sha256"
+        },
+        {
+          "path": "verification_evidence_hash",
+          "type": "sha256",
+          "commitment": "value",
+          "transform": "lowercase-hex",
+          "source_field": "mm_auth_verification_evidence_hash"
+        },
+        {
+          "path": "participant_id",
+          "type": "sha256",
+          "xlsform_type": "text",
+          "commitment": "text-utf8-sha256",
+          "transform": "odk-lexical-utf8-sha256"
+        },
+        {
+          "path": "visit_date",
+          "type": "date",
+          "xlsform_type": "date",
+          "commitment": "value",
+          "transform": "yyyy-mm-dd"
+        },
+        {
+          "path": "systolic_bp",
+          "type": "integer",
+          "xlsform_type": "integer",
+          "commitment": "value",
+          "transform": "odk-canonical-scalar"
+        },
+        {
+          "path": "clinical_outcome",
+          "type": "select_one",
+          "xlsform_type": "select_one outcome",
+          "commitment": "value",
+          "transform": "stored-choice-name",
+          "choice_list": "outcome"
+        },
+        {
+          "path": "symptoms",
+          "type": "sha256",
+          "xlsform_type": "select_multiple symptoms",
+          "commitment": "text-utf8-sha256",
+          "transform": "odk-selection-order-lexical-utf8-sha256",
+          "choice_list": "symptoms"
+        },
+        {
+          "path": "clinical_notes",
+          "type": "sha256",
+          "xlsform_type": "text",
+          "commitment": "text-utf8-sha256",
+          "transform": "odk-lexical-utf8-sha256"
+        }
+      ]
+    },
+    "recipe_sha256": "c579fcff4a04eca57a9cced83a9b94786810b4a22daec45bab961ca5c1f63ee2",
+    "members": [
+      {
+        "name": "participant_id",
+        "xlsform_type": "text",
+        "mode": "sha256",
+        "transform": "odk-lexical-utf8-sha256",
+        "reason": "text/complex lexical value hashed",
+        "source_row": 2
+      },
+      {
+        "name": "visit_date",
+        "xlsform_type": "date",
+        "mode": "value",
+        "transform": "yyyy-mm-dd",
+        "reason": "deterministic scalar value",
+        "source_row": 3
+      },
+      {
+        "name": "systolic_bp",
+        "xlsform_type": "integer",
+        "mode": "value",
+        "transform": "odk-canonical-scalar",
+        "reason": "deterministic scalar value",
+        "source_row": 4
+      },
+      {
+        "name": "clinical_outcome",
+        "xlsform_type": "select_one outcome",
+        "mode": "value",
+        "transform": "stored-choice-name",
+        "reason": "single select commits stable stored choice name",
+        "source_row": 5,
+        "choice_list": "outcome"
+      },
+      {
+        "name": "symptoms",
+        "xlsform_type": "select_multiple symptoms",
+        "mode": "sha256",
+        "transform": "odk-selection-order-lexical-utf8-sha256",
+        "reason": "multi-select commits the exact stored space-separated selection-order representation",
+        "source_row": 6,
+        "choice_list": "symptoms"
+      },
+      {
+        "name": "clinical_notes",
+        "xlsform_type": "text",
+        "mode": "sha256",
+        "transform": "odk-lexical-utf8-sha256",
+        "reason": "text/complex lexical value hashed",
+        "source_row": 7
+      }
+    ],
+    "member_count": 6
+  },
+  "exclusions": [
+    {
+      "name": "display_language",
+      "xlsform_type": "select_one language",
+      "reason": "explicitly excluded by author",
+      "explicit": true,
+      "source_row": 8
+    },
+    {
+      "name": "bp_high_flag",
+      "xlsform_type": "calculate",
+      "reason": "calculate excluded by default",
+      "explicit": false,
+      "source_row": 9
+    },
+    {
+      "name": "review_note",
+      "xlsform_type": "note",
+      "reason": "structural/metadata field",
+      "explicit": false,
+      "source_row": 10
+    }
+  ],
+  "warnings": [
+    "1 field(s) are explicitly excluded from the attested commitment: display_language"
+  ],
+  "limitations": [
+    "compiler v0.4 requires globally unique survey node names",
+    "repeat groups must be explicitly excluded",
+    "binary/media content hashing is not yet implemented and media fields must be explicitly excluded",
+    "generated XLSX semantics are deterministic but byte-for-byte ZIP reproducibility is not claimed"
+  ],
+  "release": {
+    "filename": "example_trial_form__v20260925150548__methodmesh.xlsx",
+    "sha256": "af7c424c35ed1da235f67073be38d6228f24284f5b81eca5beaa559a66c4fbbb"
+  },
+  "sentinel_task": {
+    "event_schema": "methodmesh.sentinel.task_event.v1",
+    "task_type": "form.compile",
+    "task_schema_version": "1",
+    "request_id": "6a0a5bf2-1fed-43dc-9888-0b81e7004d1b",
+    "event_file": "sentinel_task_event.json"
+  }
+}
