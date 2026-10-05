@@ -178,7 +178,13 @@ def _audit_xml(instance_id: str, fields: dict[str, str], form_version: str) -> b
 
 def _xml_safe(value: Any) -> str:
     text = str(value or "")
-    return "".join(character for character in text if character in "\t\n\r" or ord(character) >= 0x20)
+    return "".join(
+        character for character in text
+        if ord(character) in (0x9, 0xA, 0xD)
+        or 0x20 <= ord(character) <= 0xD7FF
+        or 0xE000 <= ord(character) <= 0xFFFD
+        or 0x10000 <= ord(character) <= 0x10FFFF
+    )
 
 
 def _sha(value: bytes) -> str:
