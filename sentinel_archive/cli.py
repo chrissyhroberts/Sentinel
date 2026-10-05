@@ -26,6 +26,8 @@ def main() -> None:
         audit_form_id=config.get("audit_form_id", "sentinel_project_audit"),
         audit_form_version=str(config.get("audit_form_version", "1")),
         token_env=config.get("token_env", "ODK_CENTRAL_TOKEN"),
+        timestamp_policy=config.get("timestamp_policy", "preferred"),
+        timestamp_url=config.get("timestamp_url", "https://tsa.opentsa.org:8443/tsa"),
     )
     email = config.get("email")
     if email and not os.environ.get(central_config.token_env):

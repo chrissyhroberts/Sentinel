@@ -10,6 +10,7 @@ from xml.sax.saxutils import escape
 
 from .central import CentralClient, CentralError
 from .project import audit_instance_id, checkpoint_instance_id
+from .timestamp import TimestampError, TimestampEvidence, timestamp_manifest
 
 
 class AuditSink(Protocol):
@@ -252,6 +253,7 @@ class ProjectAuditor:
         }
         manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
         manifest_hash = _sha(manifest_bytes)
+        evidence = self._timestamp_manifest(manifest_bytes)
         audit_id = run_manifest_instance_id(self.project_id, run_id)
         fields = {
             "record_type": "run_timestamp_manifest",
@@ -266,11 +268,11 @@ class ProjectAuditor:
             "central_actor_id": "",
             "change_reason": "Sentinel run manifest",
             "reason_link_status": "sentinel_run_manifest",
-            "timestamp_status": "manifest_created_not_timestamped",
-            "timestamp_time": "",
+            "timestamp_status": evidence.status,
+            "timestamp_time": evidence.time,
             "timestamp_batch_id": run_id,
             "timestamp_batch_sha256": manifest_hash,
-            "timestamp_token": "",
+            "timestamp_token": _sha(evidence.token) if evidence.token else "",
             "sentinel_run_id": run_id,
             "checkpoint_cursor": str(len(records)),
         }
@@ -278,8 +280,30 @@ class ProjectAuditor:
             self.client.config.audit_form_id,
             _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
                        self.client.config.audit_form_id),
-            {"timestamp_manifest.json": manifest_bytes},
+            self._timestamp_attachments(manifest_bytes, evidence),
         )
+
+    def _timestamp_manifest(self, manifest: bytes) -> TimestampEvidence:
+        policy = getattr(self.client.config, "timestamp_policy", "preferred").lower()
+        if policy == "disabled":
+            return TimestampEvidence(status="timestamping_disabled")
+        try:
+            return timestamp_manifest(manifest, self.client.config.timestamp_url)
+        except TimestampError as error:
+            if policy == "required":
+                raise CentralError(f"Required RFC3161 timestamp failed: {error}") from error
+            if getattr(self.client, "debug", False):
+                print(f"[debug] RFC3161 timestamp unavailable; preserving manifest only: {error}", file=sys.stderr)
+            return TimestampEvidence(status="manifest_created_not_timestamped", detail=str(error))
+
+    @staticmethod
+    def _timestamp_attachments(manifest: bytes, evidence: TimestampEvidence) -> dict[str, bytes]:
+        attachments = {"timestamp_manifest.json": manifest}
+        if evidence.token:
+            attachments["timestamp_token.tsr"] = evidence.token
+        if evidence.certificate:
+            attachments["timestamp_certificate.pem"] = evidence.certificate
+        return attachments
 
 
 def _audit_xml(instance_id: str, fields: dict[str, str], form_version: str,

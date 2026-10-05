@@ -43,10 +43,11 @@ submission UUID; Sentinel does not copy it into the audit form.
 Each run also creates a `run_timestamp_manifest` record. Its
 `timestamp_batch_sha256` is the SHA-256 of the attached `timestamp_manifest.json`,
 and `timestamp_batch_id` links the audit record to the manifest and to the
-`sentinel_run_id` values on records processed in that run. The current Sentinel
-implementation creates and preserves this batch evidence but does not itself
-call an RFC3161 authority; until a timestamp provider is configured, its status
-is explicitly `manifest_created_not_timestamped`.
+`sentinel_run_id` values on records processed in that run. Sentinel sends only
+the manifest hash to the configured RFC3161 authority. If the preferred TSA
+call is unavailable, the manifest is still preserved and its status is
+explicitly `manifest_created_not_timestamped`; a required policy fails the run
+instead.
 
 The same form also stores one deterministic project checkpoint record. A new
 run reads that checkpoint and the existing audit-form submissions before

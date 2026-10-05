@@ -7,6 +7,8 @@ from sentinel_archive.crawler import ProjectAuditor
 class FakeConfig:
     project_id = "16"
     audit_form_id = "sentinel_project_audit"
+    timestamp_policy = "disabled"
+    timestamp_url = "https://tsa.example.invalid/tsa"
 
 
 class FakeClient:

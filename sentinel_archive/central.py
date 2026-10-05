@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import sys
 import time
@@ -23,6 +24,8 @@ class CentralConfig:
     audit_form_id: str = "sentinel_project_audit"
     audit_form_version: str = "1"
     token_env: str = "ODK_CENTRAL_TOKEN"
+    timestamp_policy: str = "preferred"
+    timestamp_url: str = "https://tsa.opentsa.org:8443/tsa"
 
 
 class CentralClient:
@@ -73,10 +76,11 @@ class CentralClient:
             for filename, data in attachments.items():
                 self.upload_attachment(form_id, instance, filename, data)
 
-    def upload_attachment(self, form_id: str, instance_id: str, filename: str, data: bytes) -> None:
+    def upload_attachment(self, form_id: str, instance_id: str, filename: str, data: bytes,
+                          content_type: str | None = None) -> None:
         path = self._submission_path(form_id, instance_id) + f"/attachments/{_quote(filename)}"
         self._request("POST", path, accept="application/json", raw_body=data,
-                      content_type="application/zip")
+                      content_type=content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream")
 
     def forms(self) -> list[dict[str, Any]]:
         return _items(self.get_json(f"/v1/projects/{_quote(self.config.project_id)}/forms"))
