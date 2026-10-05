@@ -106,6 +106,9 @@ class ProjectAuditor:
             "reason_link_status": "not_applicable",
             "timestamp_status": "not_requested",
             "timestamp_time": "",
+            "timestamp_batch_id": "",
+            "timestamp_batch_sha256": "",
+            "timestamp_token": "",
             "sentinel_run_id": "",
             "checkpoint_cursor": version_id,
         }
@@ -140,6 +143,9 @@ class ProjectAuditor:
             "reason_link_status": _reason_status(comments, version_id),
             "timestamp_status": "not_requested",
             "timestamp_time": "",
+            "timestamp_batch_id": "",
+            "timestamp_batch_sha256": "",
+            "timestamp_token": "",
             "sentinel_run_id": "",
             "checkpoint_cursor": version_id,
         }
@@ -163,6 +169,9 @@ class ProjectAuditor:
             "reason_link_status": "sentinel_checkpoint",
             "timestamp_status": "not_requested",
             "timestamp_time": "",
+            "timestamp_batch_id": "",
+            "timestamp_batch_sha256": "",
+            "timestamp_token": "",
             "sentinel_run_id": "",
             "checkpoint_cursor": str(versions_seen),
         }
