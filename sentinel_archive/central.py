@@ -103,7 +103,12 @@ class CentralClient:
         return self.get_bytes(path)
 
     def submission_xml(self, form_id: str, instance_id: str) -> bytes:
-        return self.get_bytes(self._submission_path(form_id, instance_id) + ".xml")
+        result = self._request(
+            "GET", self._submission_path(form_id, instance_id) + ".xml",
+            accept="application/xml", raw=True,
+        )
+        assert isinstance(result, bytes)
+        return result
 
     def attachment_bytes(self, form_id: str, instance_id: str, version_id: str, filename: str) -> bytes:
         path = (self._submission_path(form_id, instance_id)
