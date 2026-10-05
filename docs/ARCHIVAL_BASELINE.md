@@ -35,7 +35,22 @@ Sentinel records the pending state together with local clock-drift and
 monotonic evidence, then adds the later trusted timestamp when connectivity
 returns.
 
-## Archive layout
+## Central storage boundary
+
+The production destination is the universal audit form published in the same
+Central project. Sentinel may use bounded transient files while downloading or
+building one source bundle, but it must not retain a local research archive.
+The local `ArchiveStore` implementation is currently a deterministic test
+harness for the record structure; the Central-backed sink is the required
+production path.
+
+The Central audit record contains one exact source bundle attachment when the
+retention policy requires it. That bundle contains the original submission,
+Collect audit file, and attachments. The audit form therefore becomes the
+durable archive without introducing a second database or a project-specific
+Sentinel installation.
+
+## Development fixture layout
 
 ```text
 archive/
@@ -49,9 +64,9 @@ archive/
       version_manifest.json
 ```
 
-The restricted archive retains exact research data. A separate privacy-safe
-auditor export can expose identifiers, hashes, version chronology, actors,
-reasons and timestamp status without exposing record values or attachments.
+The fixture layout is for local tests only. In production, the same manifest
+and report are submitted to the project audit form and the exact source bundle
+is retained there.
 
 ## XLSForm boundary
 

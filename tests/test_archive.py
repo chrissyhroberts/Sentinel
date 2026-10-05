@@ -4,9 +4,16 @@ import unittest
 from pathlib import Path
 
 from sentinel_archive import ArchiveStore, VersionInput
+from sentinel_archive import audit_instance_id, checkpoint_instance_id
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_audit_ids_are_deterministic_and_project_scoped(self):
+        first = audit_instance_id("16", "form", "uuid:1", "uuid:v1")
+        self.assertEqual(first, audit_instance_id("16", "form", "uuid:1", "uuid:v1"))
+        self.assertNotEqual(first, audit_instance_id("17", "form", "uuid:1", "uuid:v1"))
+        self.assertTrue(checkpoint_instance_id("16").startswith("uuid:sentinel-checkpoint-"))
+
     def test_archives_exact_submission_audit_and_edit_reason(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

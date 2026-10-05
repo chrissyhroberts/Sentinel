@@ -10,6 +10,9 @@ MethodMesh payloads from XLSForm recipes.
 See [the archival baseline](docs/ARCHIVAL_BASELINE.md) for the governing
 scope, evidence model and archive layout.
 
+The audit boundary is always one explicitly configured Central project. See
+the [universal project audit form contract](docs/PROJECT_AUDIT_FORM_CONTRACT.md).
+
 The small reference implementation is in `sentinel_archive/`. It is designed
 to be called by the future Central downloader: give it the exact downloaded
 submission, audit file, attachments, Central metadata, change events and any
