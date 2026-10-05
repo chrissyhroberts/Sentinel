@@ -47,6 +47,11 @@ class ProjectAuditor:
 
     def plan(self) -> AuditPlan:
         all_forms = self.client.forms()
+        deleted_forms = []
+        try:
+            deleted_forms = self.client.forms(deleted=True)
+        except (AttributeError, TypeError):
+            pass
         audit_form = self.client.config.audit_form_id
         if not any((form.get("xmlFormId") or form.get("formId")) == audit_form for form in all_forms):
             raise RuntimeError(f"Audit form {audit_form!r} was not found in project {self.project_id}")
@@ -66,6 +71,7 @@ class ProjectAuditor:
                     version_id = str(version.get("instanceId") or version.get("versionId") or version.get("id") or "")
                     if version_id:
                         tasks.append(("submission_version", form_id, logical_id, version_id, version))
+        tasks.extend(self._central_event_tasks(tuple(all_forms) + tuple(deleted_forms), tasks))
         existing = self._existing_audit_ids()
         if hasattr(self.client, "submission"):
             for task in tasks:
@@ -98,7 +104,7 @@ class ProjectAuditor:
                     "audit_instance_id": record_id,
                     "record_type": "source_form_version" if kind == "form_version" else (
                         "original_submission" if version_id == logical_id else "submission_edit"
-                    ),
+                    ) if kind == "submission_version" else metadata.get("record_type", "central_event"),
                     "status": "already_present",
                     "source_form_id": form_id,
                     "source_instance_id": logical_id,
@@ -112,8 +118,11 @@ class ProjectAuditor:
                 if kind == "form_version":
                     fields = self._submit_form_version(form_id, version_id, metadata, run_id)
                     form_versions_submitted += 1
-                else:
+                elif kind == "submission_version":
                     fields = self._submit_version(form_id, logical_id, version_id, metadata, run_id)
+                    submitted += 1
+                else:
+                    fields = self._submit_central_event(form_id, logical_id, version_id, metadata, run_id)
                     submitted += 1
                 run_records.append({
                     "audit_instance_id": record_id,
@@ -132,7 +141,7 @@ class ProjectAuditor:
                     "audit_instance_id": record_id,
                     "record_type": "source_form_version" if kind == "form_version" else (
                         "original_submission" if version_id == logical_id else "submission_edit"
-                    ),
+                    ) if kind == "submission_version" else metadata.get("record_type", "central_event"),
                     "status": "already_present",
                     "source_form_id": form_id,
                     "source_instance_id": logical_id,
@@ -145,6 +154,76 @@ class ProjectAuditor:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped, run_id=run_id)
         self._submit_run_manifest(run_id, run_records)
         return RunSummary(self.project_id, seen, submitted + skipped, submitted, skipped, form_versions_submitted)
+
+    def _central_event_tasks(self, forms: tuple[dict[str, Any], ...], source_tasks: list[tuple]) -> list[tuple]:
+        getter = getattr(self.client, "server_audits", None)
+        if getter is None:
+            return []
+        events = getter()
+        form_ids = {str(form.get("xmlFormId") or form.get("formId") or "") for form in forms}
+        form_ids.discard("")
+        form_numeric_ids = {str(form.get("id")) for form in forms if form.get("id") is not None}
+        submission_ids = {task[2] for task in source_tasks if task[0] == "submission_version"}
+        actor_ids = {
+            str(task[4].get("actorId") or task[4].get("submitterId"))
+            for task in source_tasks if task[0] == "submission_version"
+            and (task[4].get("actorId") or task[4].get("submitterId")) is not None
+        }
+        tasks: list[tuple] = []
+        for event in events:
+            action = str(event.get("action") or "")
+            if not _central_action_is_relevant(action):
+                continue
+            if not _central_event_in_project(event, self.project_id, form_ids, form_numeric_ids,
+                                              submission_ids, actor_ids):
+                continue
+            event_key = _central_event_key(event)
+            metadata = {
+                "record_type": _central_record_type(action),
+                "project_id": self.project_id,
+                "event": event,
+            }
+            tasks.append(("central_event", "central-event", event_key, event_key, metadata))
+        return tasks
+
+    def _submit_central_event(self, _form_id: str, event_key: str, _version_id: str,
+                              metadata: dict[str, Any], run_id: str) -> dict[str, str]:
+        event = metadata["event"]
+        action = str(event.get("action") or "")
+        details = event.get("details") if isinstance(event.get("details"), dict) else {}
+        actor_id = event.get("actorId")
+        source_form_id = str(details.get("xmlFormId") or details.get("formId") or "")
+        source_instance_id = str(details.get("instanceId") or details.get("submissionId") or "")
+        event_json = json.dumps(event, sort_keys=True, ensure_ascii=False).encode()
+        audit_id = audit_instance_id(self.project_id, "central-event", event_key, event_key)
+        fields = {
+            "record_type": metadata["record_type"],
+            "project_id": self.project_id,
+            "source_form_id": source_form_id,
+            "source_instance_id": source_instance_id,
+            "source_version_id": event_key,
+            "source_audit_instance_id": audit_id,
+            "source_content_sha256": _sha(event_json),
+            "collect_audit_sha256": "",
+            "central_created_at": str(event.get("loggedAt") or ""),
+            "central_actor_id": self._actor_email(actor_id) or str(actor_id or ""),
+            "change_reason": _central_event_summary(action, details),
+            "reason_link_status": "central_server_audit",
+            "timestamp_status": "not_requested",
+            "timestamp_time": "",
+            "timestamp_batch_id": "",
+            "timestamp_batch_sha256": "",
+            "timestamp_manifest": "",
+            "timestamp_token": "",
+            "timestamp_token_sha256": "",
+            "timestamp_certificate": "",
+            "sentinel_run_id": run_id,
+            "checkpoint_cursor": event_key,
+        }
+        self.sink.submit(self.client.config.audit_form_id, _audit_xml(
+            audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
+            self.client.config.audit_form_id), {})
+        return fields
 
     def _submit_form_version(self, form_id: str, version_id: str, metadata: dict[str, Any], run_id: str) -> dict[str, str]:
         xml = self.client.form_version_bytes(form_id, version_id, "xml")
@@ -389,6 +468,63 @@ def _sha(value: bytes) -> str:
 
 def _sha_json(value: Any) -> str:
     return _sha(json.dumps(value, sort_keys=True, ensure_ascii=False).encode())
+
+
+def _central_action_is_relevant(action: str) -> bool:
+    return action.startswith(("project.", "form.", "submission.")) or action in {
+        "user.create", "user.update", "user.delete", "user.session.create",
+        "field_key.session.end", "public_link.session.end",
+    }
+
+
+def _central_event_in_project(event: dict[str, Any], project_id: str, form_ids: set[str],
+                              form_numeric_ids: set[str], submission_ids: set[str],
+                              actor_ids: set[str]) -> bool:
+    action = str(event.get("action") or "")
+    actee = str(event.get("acteeId") or "")
+    details = event.get("details") if isinstance(event.get("details"), dict) else {}
+    values = {str(value) for value in _flatten_values(details)}
+    if action.startswith("project."):
+        return actee == str(project_id) or str(project_id) in values
+    if actee in form_ids or actee in form_numeric_ids or actee in submission_ids:
+        return True
+    if form_ids.intersection(values) or form_numeric_ids.intersection(values):
+        return True
+    if str(project_id) in values:
+        return True
+    if action.startswith("user.") or action in {"field_key.session.end", "public_link.session.end"}:
+        return actee in actor_ids or str(event.get("actorId") or "") in actor_ids or bool(actor_ids.intersection(values))
+    return False
+
+
+def _flatten_values(value: Any) -> list[Any]:
+    if isinstance(value, dict):
+        result: list[Any] = []
+        for child in value.values():
+            result.extend(_flatten_values(child))
+        return result
+    if isinstance(value, list):
+        result = []
+        for child in value:
+            result.extend(_flatten_values(child))
+        return result
+    return [value]
+
+
+def _central_event_key(event: dict[str, Any]) -> str:
+    return str(event.get("id") or _sha(json.dumps(event, sort_keys=True, ensure_ascii=False).encode())[:48])
+
+
+def _central_record_type(action: str) -> str:
+    words = action.replace(".", "_")
+    return f"central_{words}"
+
+
+def _central_event_summary(action: str, details: dict[str, Any]) -> str:
+    for key in ("note", "notes", "actionNotes", "reason"):
+        if details.get(key):
+            return f"{action}: {str(details[key])[:48]}"[:64]
+    return action[:64]
 
 
 def _run_id() -> str:

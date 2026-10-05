@@ -86,8 +86,23 @@ class CentralClient:
         self._request("POST", path, accept="application/json", raw_body=data,
                       content_type=content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream")
 
-    def forms(self) -> list[dict[str, Any]]:
-        return _items(self.get_json(f"/v1/projects/{_quote(self.config.project_id)}/forms"))
+    def forms(self, *, deleted: bool = False) -> list[dict[str, Any]]:
+        suffix = "?deleted=true" if deleted else ""
+        return _items(self.get_json(f"/v1/projects/{_quote(self.config.project_id)}/forms{suffix}"))
+
+    def server_audits(self, *, limit: int = 1000, offset: int = 0) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        while True:
+            path = f"/v1/audits?limit={int(limit)}&offset={int(offset)}"
+            value = self._request(
+                "GET", path, accept="application/json",
+                extra_headers={"X-Extended-Metadata": "true"},
+            )
+            page = _items(value)
+            result.extend(page)
+            if len(page) < limit:
+                return result
+            offset += limit
 
     def submissions(self, form_id: str) -> list[dict[str, Any]]:
         return _items(self.get_json(self._form_path(form_id) + "/submissions"))
