@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sys
 import zipfile
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -75,6 +76,9 @@ class ProjectAuditor:
             if record_id in completed:
                 skipped += 1
                 continue
+            if self.client.debug:
+                label = f"{form_id}/{version_id}" if kind == "form_version" else f"{form_id}/{logical_id}/{version_id}"
+                print(f"[debug] archiving {kind}: {label}", file=sys.stderr)
             if kind == "form_version":
                 self._submit_form_version(form_id, version_id, metadata)
                 form_versions_submitted += 1

@@ -15,6 +15,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Audit one ODK Central project into its Sentinel audit form")
     parser.add_argument("config", type=Path, help="JSON config containing base_url, project_id and audit_form_id")
     parser.add_argument("--plan-only", action="store_true", help="discover and print pending work without submitting anything")
+    parser.add_argument("--debug", action="store_true", help="print progress and retry diagnostics to the terminal")
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding="utf-8"))
     central_config = CentralConfig(
@@ -26,9 +27,9 @@ def main() -> None:
     email = config.get("email")
     if email and not os.environ.get(central_config.token_env):
         password = getpass.getpass(f"Central password for {email}: ")
-        client = CentralClient.login(central_config, email, password)
+        client = CentralClient.login(central_config, email, password, debug=args.debug)
     else:
-        client = CentralClient(central_config)
+        client = CentralClient(central_config, debug=args.debug)
     auditor = ProjectAuditor(client)
     plan = auditor.plan()
     pending = [task for task in plan.tasks if audit_instance_id(

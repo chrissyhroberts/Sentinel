@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -25,14 +27,15 @@ class CentralConfig:
 class CentralClient:
     """Small read/read-submit ODK Central client with no local data cache."""
 
-    def __init__(self, config: CentralConfig, token: str | None = None):
+    def __init__(self, config: CentralConfig, token: str | None = None, *, debug: bool = False):
         self.config = config
         self.token = token or os.environ.get(config.token_env)
         self.base_url = config.base_url.rstrip("/")
+        self.debug = debug
 
     @classmethod
-    def login(cls, config: CentralConfig, email: str, password: str) -> "CentralClient":
-        client = cls(config, token="session-login")
+    def login(cls, config: CentralConfig, email: str, password: str, *, debug: bool = False) -> "CentralClient":
+        client = cls(config, token="session-login", debug=debug)
         response = client._request(
             "POST", "/v1/sessions", accept="application/json",
             json_body={"email": email, "password": password},
@@ -40,7 +43,7 @@ class CentralClient:
         token = response.get("token") if isinstance(response, dict) else None
         if not token:
             raise CentralError("Central login did not return a session token")
-        return cls(config, token=str(token))
+        return cls(config, token=str(token), debug=debug)
 
     def get_json(self, path: str) -> Any:
         return self._request("GET", path, accept="application/json")
@@ -134,15 +137,23 @@ class CentralClient:
             boundary = "----SentinelBoundary7d3c4f"
             headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
             body = _multipart(boundary, multipart)
-        request = urllib.request.Request(self.base_url + path, data=body, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                data = response.read()
-        except urllib.error.HTTPError as error:
-            detail = error.read(2048).decode("utf-8", "replace")
-            raise CentralError(f"Central {method} {path} returned HTTP {error.code}: {detail}") from error
-        except urllib.error.URLError as error:
-            raise CentralError(f"Central {method} {path} failed: {error.reason}") from error
+        attempts = 3 if method == "GET" else 1
+        for attempt in range(attempts):
+            request = urllib.request.Request(self.base_url + path, data=body, headers=headers, method=method)
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    data = response.read()
+                break
+            except urllib.error.HTTPError as error:
+                detail = error.read(2048).decode("utf-8", "replace")
+                raise CentralError(f"Central {method} {path} returned HTTP {error.code}: {detail}") from error
+            except (urllib.error.URLError, ConnectionError, BrokenPipeError) as error:
+                if attempt + 1 >= attempts:
+                    reason = getattr(error, "reason", None) or str(error)
+                    raise CentralError(f"Central {method} {path} failed after {attempts} attempts: {reason}") from error
+                if self.debug:
+                    print(f"[debug] Central {method} {path} connection failed; retrying ({attempt + 2}/{attempts})", file=sys.stderr)
+                time.sleep(1.5 * (attempt + 1))
         if raw:
             return data
         if not data:
