@@ -384,13 +384,61 @@ def _reason(audits: list[dict[str, Any]], version_id: str, version: dict[str, An
     through details.versionId and/or an action note.
     """
     values: list[str] = []
-    for event in audits:
-        if not _audit_event_matches(event, version_id, version, logical_id):
-            continue
+    events = [event for event in audits if _audit_event_matches(event, version_id, version, logical_id)]
+    if version_id != logical_id and not any(version_id in _referenced_values(event) for event in events):
+        events = _nearest_edit_events(audits, version)
+    for event in events:
         for value in _note_values(event):
             if value and value not in values:
                 values.append(value)
     return " | ".join(values)
+
+
+def _nearest_edit_events(audits: list[dict[str, Any]], version: dict[str, Any]) -> list[dict[str, Any]]:
+    """Pair a version with the nearby server-side edit/comment events.
+
+    Central's comments endpoint has no timestamp or version ID.  The server
+    audit stream does have ``loggedAt`` and is ordered newest first, so when an
+    edit event lacks an explicit version reference we use the version's
+    ``createdAt`` as the anchor and include the nearest edit plus the nearest
+    preceding comment by the same actor.
+    """
+    version_time = _event_time(version)
+    if version_time is None:
+        return []
+    updates = [
+        event for event in audits
+        if "submission.update" in str(event.get("action", "")).lower()
+        and _event_time(event) is not None
+    ]
+    if not updates:
+        return []
+    update = min(updates, key=lambda event: abs((_event_time(event) - version_time).total_seconds()))
+    update_time = _event_time(update)
+    if update_time is None or abs((update_time - version_time).total_seconds()) > 300:
+        return []
+    result = [update]
+    actor = update.get("actorId")
+    comments = [
+        event for event in audits
+        if "comment" in str(event.get("action", "")).lower()
+        and _event_time(event) is not None
+        and _event_time(event) <= update_time
+        and (actor is None or event.get("actorId") in (None, actor))
+    ]
+    if comments:
+        result.insert(0, max(comments, key=lambda event: _event_time(event)))
+    return result
+
+
+def _event_time(value: dict[str, Any]) -> datetime | None:
+    raw = value.get("loggedAt") or value.get("createdAt") or value.get("created_at")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _reason_status(audits: list[dict[str, Any]], version_id: str, version: dict[str, Any], logical_id: str,
@@ -435,7 +483,7 @@ def _referenced_values(value: Any) -> set[str]:
 
 def _note_values(event: dict[str, Any]) -> list[str]:
     values: list[str] = []
-    keys = {"reason", "note", "notes", "actionnotes", "changereason", "comment"}
+    keys = {"reason", "note", "notes", "actionnotes", "changereason", "comment", "body", "message"}
 
     def visit(value: Any, key: str = "") -> None:
         if isinstance(value, dict):
