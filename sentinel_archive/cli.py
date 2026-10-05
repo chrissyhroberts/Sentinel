@@ -28,6 +28,7 @@ def main() -> None:
         token_env=config.get("token_env", "ODK_CENTRAL_TOKEN"),
         timestamp_policy=config.get("timestamp_policy", "preferred"),
         timestamp_url=config.get("timestamp_url", "https://tsr.open-tsa.eu"),
+        server_audit_start=config.get("server_audit_start", ""),
     )
     email = config.get("email")
     if email and not os.environ.get(central_config.token_env):

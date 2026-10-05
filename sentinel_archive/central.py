@@ -26,6 +26,7 @@ class CentralConfig:
     token_env: str = "ODK_CENTRAL_TOKEN"
     timestamp_policy: str = "preferred"
     timestamp_url: str = "https://tsr.open-tsa.eu"
+    server_audit_start: str = ""
 
 
 class CentralClient:
@@ -90,10 +91,14 @@ class CentralClient:
         suffix = "?deleted=true" if deleted else ""
         return _items(self.get_json(f"/v1/projects/{_quote(self.config.project_id)}/forms{suffix}"))
 
-    def server_audits(self, *, limit: int = 1000, offset: int = 0) -> list[dict[str, Any]]:
+    def server_audits(self, *, start: str | None = None, limit: int = 1000,
+                      offset: int = 0) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         while True:
-            path = f"/v1/audits?limit={int(limit)}&offset={int(offset)}"
+            query = f"limit={int(limit)}&offset={int(offset)}"
+            if start:
+                query += f"&start={urllib.parse.quote(str(start), safe='') }"
+            path = f"/v1/audits?{query}"
             value = self._request(
                 "GET", path, accept="application/json",
                 extra_headers={"X-Extended-Metadata": "true"},

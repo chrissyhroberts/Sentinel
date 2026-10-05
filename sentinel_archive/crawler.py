@@ -5,7 +5,7 @@ import json
 import csv
 import io
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Any, Protocol
 from xml.sax.saxutils import escape
@@ -159,8 +159,14 @@ class ProjectAuditor:
         getter = getattr(self.client, "server_audits", None)
         if getter is None:
             return []
-        events = getter()
-        form_ids = {str(form.get("xmlFormId") or form.get("formId") or "") for form in forms}
+        start = self._server_audit_start()
+        events = getter(start=start) if start else getter()
+        audit_form = self.client.config.audit_form_id
+        form_ids = {
+            str(form.get("xmlFormId") or form.get("formId") or "")
+            for form in forms
+            if (form.get("xmlFormId") or form.get("formId")) != audit_form
+        }
         form_ids.discard("")
         form_numeric_ids = {str(form.get("id")) for form in forms if form.get("id") is not None}
         submission_ids = {task[2] for task in source_tasks if task[0] == "submission_version"}
@@ -185,6 +191,26 @@ class ProjectAuditor:
             }
             tasks.append(("central_event", "central-event", event_key, event_key, metadata))
         return tasks
+
+    def _server_audit_start(self) -> str | None:
+        configured = getattr(self.client.config, "server_audit_start", "")
+        if configured:
+            return str(configured)
+        try:
+            submissions = self.client.submissions(self.client.config.audit_form_id)
+        except CentralError:
+            return None
+        dates = []
+        for submission in submissions:
+            value = submission.get("createdAt") or submission.get("created_at")
+            parsed = _parse_time(value)
+            if parsed:
+                dates.append(parsed)
+        if not dates:
+            return None
+        # Small overlap prevents events at the edge of a previous run from
+        # being missed. Deterministic event IDs make the overlap harmless.
+        return (max(dates) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
 
     def _submit_central_event(self, _form_id: str, event_key: str, _version_id: str,
                               metadata: dict[str, Any], run_id: str) -> dict[str, str]:
@@ -594,6 +620,10 @@ def _nearest_edit_events(audits: list[dict[str, Any]], version: dict[str, Any]) 
 
 def _event_time(value: dict[str, Any]) -> datetime | None:
     raw = value.get("loggedAt") or value.get("createdAt") or value.get("created_at")
+    return _parse_time(raw)
+
+
+def _parse_time(raw: Any) -> datetime | None:
     if not raw:
         return None
     try:
