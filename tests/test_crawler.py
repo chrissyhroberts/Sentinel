@@ -75,6 +75,8 @@ class CrawlerTests(unittest.TestCase):
         manifest = [item for item in sink.submissions if b"<record_type>run_timestamp_manifest</record_type>" in item[1]][0]
         self.assertEqual(set(manifest[2]), {"timestamp_manifest.json"})
         self.assertIn(b"submission_edit", manifest[2]["timestamp_manifest.json"])
+        self.assertIn(b"<timestamp_manifest>timestamp_manifest.json</timestamp_manifest>", manifest[1])
+        self.assertIn(b"<timestamp_token></timestamp_token>", manifest[1])
         self.assertIn(b'<data id="sentinel_project_audit" version="1"', submission[1])
         self.assertIn(b"<orx:meta><orx:instanceID>", submission[1])
         self.assertEqual(submission[2], {})
