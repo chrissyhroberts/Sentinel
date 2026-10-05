@@ -76,7 +76,7 @@ class ProjectAuditor:
             if record_id in completed:
                 skipped += 1
                 continue
-            if self.client.debug:
+            if getattr(self.client, "debug", False):
                 label = f"{form_id}/{version_id}" if kind == "form_version" else f"{form_id}/{logical_id}/{version_id}"
                 print(f"[debug] archiving {kind}: {label}", file=sys.stderr)
             if kind == "form_version":
