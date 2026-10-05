@@ -154,6 +154,11 @@ class CentralClient:
                 + f"/versions/{_quote(version_id)}/attachments/{_quote(filename)}")
         return self.get_bytes(path)
 
+    def version_attachments(self, form_id: str, instance_id: str, version_id: str) -> list[dict[str, Any]]:
+        path = (self._submission_path(form_id, instance_id)
+                + f"/versions/{_quote(version_id)}/attachments")
+        return _items(self.get_json(path))
+
     def audits(self, form_id: str, instance_id: str) -> list[dict[str, Any]]:
         value = self._request(
             "GET", self._submission_path(form_id, instance_id) + "/audits",

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import csv
+import io
 import sys
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -187,9 +189,15 @@ class ProjectAuditor:
                         version: dict[str, Any], run_id: str) -> dict[str, str]:
         source = self.client.version_xml(form_id, logical_id, version_id)
         audits = self.client.audits(form_id, logical_id)
+        diffs = self.client.diffs(form_id, logical_id) if is_edit_candidate(version_id, logical_id) else {}
+        collect_audit = _collect_audit_bytes(self.client, form_id, logical_id, version_id)
         audit_id = audit_instance_id(self.project_id, form_id, logical_id, version_id)
         actor_id = version.get("actorId") or version.get("submitterId")
         is_edit = version_id != logical_id
+        change_summary = _change_summary(diffs, version_id)
+        collect_reason = _collect_reason(collect_audit)
+        central_reason = _reason(audits, version_id, version, logical_id)
+        reason = _combine_reason(change_summary, collect_reason or central_reason)
         metadata = {
             "record_type": "submission_edit" if is_edit else "original_submission",
             "project_id": self.project_id,
@@ -201,8 +209,11 @@ class ProjectAuditor:
             "collect_audit_sha256": _sha_json(audits),
             "central_created_at": version.get("createdAt") or version.get("created_at"),
             "central_actor_id": self._actor_email(actor_id) or actor_id,
-            "change_reason": _reason(audits, version_id, version, logical_id),
-            "reason_link_status": _reason_status(audits, version_id, version, logical_id),
+            "change_reason": reason,
+            "reason_link_status": _reason_status(
+                audits, version_id, version, logical_id,
+                collect_reason=bool(collect_reason), change_summary=bool(change_summary),
+            ),
             "timestamp_status": "not_requested",
             "timestamp_time": "",
             "timestamp_batch_id": "",
@@ -382,11 +393,16 @@ def _reason(audits: list[dict[str, Any]], version_id: str, version: dict[str, An
     return " | ".join(values)
 
 
-def _reason_status(audits: list[dict[str, Any]], version_id: str, version: dict[str, Any], logical_id: str) -> str:
+def _reason_status(audits: list[dict[str, Any]], version_id: str, version: dict[str, Any], logical_id: str,
+                   *, collect_reason: bool = False, change_summary: bool = False) -> str:
     if version_id == logical_id:
         return "not_applicable"
+    if collect_reason:
+        return "linked_collect_audit"
     if _reason(audits, version_id, version, logical_id):
         return "linked_central_audit"
+    if change_summary:
+        return "edit_recorded_reason_missing"
     if any(_audit_event_matches(event, version_id, version, logical_id) for event in audits):
         return "edit_reason_not_recorded"
     return "no_linked_edit_audit"
@@ -406,7 +422,7 @@ def _referenced_values(value: Any) -> set[str]:
     found: set[str] = set()
     if isinstance(value, dict):
         for key, child in value.items():
-            key_lower = str(key).lower().replace("_", "")
+            key_lower = _normalise_key(key)
             if key_lower in {"versionid", "submissionversionid", "newversionid", "instanceid", "newinstanceid"}:
                 if child is not None:
                     found.add(str(child))
@@ -424,7 +440,7 @@ def _note_values(event: dict[str, Any]) -> list[str]:
     def visit(value: Any, key: str = "") -> None:
         if isinstance(value, dict):
             for child_key, child in value.items():
-                visit(child, str(child_key).lower().replace("_", ""))
+                visit(child, _normalise_key(child_key))
         elif key in keys and value not in (None, ""):
             text = str(value)
             if text not in values:
@@ -432,6 +448,71 @@ def _note_values(event: dict[str, Any]) -> list[str]:
 
     visit(event)
     return values
+
+
+def is_edit_candidate(version_id: str, logical_id: str) -> bool:
+    return version_id != logical_id
+
+
+def _collect_audit_bytes(client: Any, form_id: str, logical_id: str, version_id: str) -> bytes:
+    listing = getattr(client, "version_attachments", None)
+    downloader = getattr(client, "attachment_bytes", None)
+    if listing is None or downloader is None:
+        return b""
+    for item in listing(form_id, logical_id, version_id):
+        name = str(item.get("name") or "")
+        if item.get("exists") and name.lower().endswith("audit.csv"):
+            return downloader(form_id, logical_id, version_id, name)
+    return b""
+
+
+def _collect_reason(data: bytes) -> str:
+    if not data:
+        return ""
+    try:
+        rows = csv.DictReader(io.StringIO(data.decode("utf-8-sig", "replace")))
+    except csv.Error:
+        return ""
+    reasons: list[str] = []
+    for row in rows:
+        normalised = {_normalise_key(key): value for key, value in row.items() if key}
+        event = _normalise_key(normalised.get("event", ""))
+        if "changereason" not in event and "changereason" not in normalised:
+            continue
+        value = normalised.get("changereason") or normalised.get("reason") or ""
+        if value and value not in reasons:
+            reasons.append(value)
+    return " | ".join(reasons)
+
+
+def _change_summary(diffs: Any, version_id: str) -> str:
+    changes = diffs.get(version_id) if isinstance(diffs, dict) else None
+    if not isinstance(changes, list):
+        return ""
+    values: list[str] = []
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        path = "/" + "/".join(str(part) for part in change.get("path", []))
+        if path in {"/meta/instanceID", "/meta/deprecatedID"}:
+            continue
+        old = "(blank)" if change.get("old") in (None, "") else str(change.get("old"))
+        new = "(blank)" if change.get("new") in (None, "") else str(change.get("new"))
+        values.append(f"{path}: {old} -> {new}")
+    return "; ".join(values)
+
+
+def _combine_reason(change_summary: str, reason: str) -> str:
+    parts = []
+    if change_summary:
+        parts.append(f"Changed: {change_summary}")
+    if reason:
+        parts.append(f"Reason: {reason}")
+    return " | ".join(parts)
+
+
+def _normalise_key(value: Any) -> str:
+    return str(value or "").lower().replace("_", "").replace("-", "").replace(" ", "")
 
 
 def _is_existing_record(error: CentralError) -> bool:

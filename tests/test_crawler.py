@@ -46,7 +46,13 @@ class FakeClient:
         return "user@example.org" if actor_id == "user-1" else ""
 
     def diffs(self, form_id, instance_id):
-        return {"versions": []}
+        return {"uuid:v1": [{"path": ["answer"], "old": "old", "new": "new"}]}
+
+    def version_attachments(self, form_id, instance_id, version_id):
+        return [{"name": "audit.csv", "exists": True}]
+
+    def attachment_bytes(self, form_id, instance_id, version_id, filename):
+        return b"event,node,change-reason\nchange reason,,corrected source value\n"
 
 
 class FakeSink:
@@ -68,10 +74,10 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(summary.versions_submitted, 1)
         self.assertEqual(summary.form_versions_submitted, 1)
         self.assertEqual(len(sink.submissions), 4)
-        submission = [item for item in sink.submissions if b"linked_central_audit" in item[1]][0]
+        submission = [item for item in sink.submissions if b"linked_collect_audit" in item[1]][0]
         self.assertIn(b"<record_type>submission_edit</record_type>", submission[1])
         self.assertIn(b"<central_actor_id>user@example.org</central_actor_id>", submission[1])
-        self.assertIn(b"<change_reason>corrected source value</change_reason>", submission[1])
+        self.assertIn(b"Changed: /answer: old -&gt; new | Reason: corrected source value", submission[1])
         manifest = [item for item in sink.submissions if b"<record_type>run_timestamp_manifest</record_type>" in item[1]][0]
         self.assertEqual(set(manifest[2]), {"timestamp_manifest.json"})
         self.assertIn(b"submission_edit", manifest[2]["timestamp_manifest.json"])
