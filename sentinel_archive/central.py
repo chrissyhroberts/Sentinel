@@ -5,6 +5,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,13 +52,24 @@ class CentralClient:
 
     def submit(self, form_id: str, xml: bytes, attachments: dict[str, bytes]) -> None:
         fields = {"xml_submission_file": ("submission.xml", xml, "text/xml")}
-        fields.update({name: (name, data, "application/octet-stream") for name, data in attachments.items()})
         self._request(
             "POST",
             f"/v1/projects/{_quote(self.config.project_id)}/forms/{_quote(form_id)}/submissions",
             accept="application/json",
             multipart=fields,
         )
+        if attachments:
+            root = ET.fromstring(xml)
+            instance = next((node.text for node in root.iter() if node.tag.endswith("instanceID")), None)
+            if not instance:
+                raise CentralError("Audit submission XML did not contain an instanceID")
+            for filename, data in attachments.items():
+                self.upload_attachment(form_id, instance, filename, data)
+
+    def upload_attachment(self, form_id: str, instance_id: str, filename: str, data: bytes) -> None:
+        path = self._submission_path(form_id, instance_id) + f"/attachments/{_quote(filename)}"
+        self._request("POST", path, accept="application/json", raw_body=data,
+                      content_type="application/zip")
 
     def forms(self) -> list[dict[str, Any]]:
         return _items(self.get_json(f"/v1/projects/{_quote(self.config.project_id)}/forms"))
@@ -105,7 +117,9 @@ class CentralClient:
 
     def _request(self, method: str, path: str, *, accept: str, raw: bool = False,
                  multipart: dict[str, tuple[str, bytes, str]] | None = None,
-                 json_body: dict[str, Any] | None = None) -> Any:
+                 json_body: dict[str, Any] | None = None,
+                 raw_body: bytes | None = None,
+                 content_type: str | None = None) -> Any:
         body = None
         headers = {"Accept": accept}
         if self.token and self.token != "session-login":
@@ -113,6 +127,9 @@ class CentralClient:
         if json_body is not None:
             body = json.dumps(json_body).encode("utf-8")
             headers["Content-Type"] = "application/json"
+        if raw_body is not None:
+            body = raw_body
+            headers["Content-Type"] = content_type or "application/octet-stream"
         if multipart is not None:
             boundary = "----SentinelBoundary7d3c4f"
             headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
