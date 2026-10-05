@@ -58,9 +58,11 @@ class CentralClient:
         fields = {"xml_submission_file": ("submission.xml", xml, "text/xml")}
         self._request(
             "POST",
-            f"/v1/projects/{_quote(self.config.project_id)}/forms/{_quote(form_id)}/submissions",
-            accept="application/json",
+            f"/v1/projects/{_quote(self.config.project_id)}/submission",
+            accept="text/xml",
+            raw=True,
             multipart=fields,
+            extra_headers={"X-OpenRosa-Version": "1.0"},
         )
         if attachments:
             root = ET.fromstring(xml)
@@ -134,9 +136,12 @@ class CentralClient:
                  multipart: dict[str, tuple[str, bytes, str]] | None = None,
                  json_body: dict[str, Any] | None = None,
                  raw_body: bytes | None = None,
-                 content_type: str | None = None) -> Any:
+                 content_type: str | None = None,
+                 extra_headers: dict[str, str] | None = None) -> Any:
         body = None
         headers = {"Accept": accept}
+        if extra_headers:
+            headers.update(extra_headers)
         if self.token and self.token != "session-login":
             headers["Authorization"] = f"Bearer {self.token}"
         if json_body is not None:
