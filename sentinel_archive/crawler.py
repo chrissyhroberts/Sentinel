@@ -23,6 +23,7 @@ class RunSummary:
     versions_seen: int
     versions_submitted: int
     versions_skipped: int
+    form_versions_submitted: int
 
 
 class ProjectAuditor:
@@ -36,12 +37,22 @@ class ProjectAuditor:
     def run(self) -> RunSummary:
         completed = self._existing_audit_ids()
         forms = [form for form in self.client.forms() if form.get("xmlFormId") != self.client.config.audit_form_id]
-        seen = submitted = skipped = 0
+        seen = submitted = skipped = form_versions_submitted = 0
         for form in forms:
             form_id = str(form.get("xmlFormId") or form.get("formId"))
             if not form_id:
                 continue
             seen += 1
+            for form_version in self.client.form_versions(form_id):
+                form_version_id = str(form_version.get("version") or form_version.get("id") or "")
+                if not form_version_id:
+                    continue
+                record_id = audit_instance_id(self.project_id, form_id, "form-definition", form_version_id)
+                if record_id in completed:
+                    skipped += 1
+                    continue
+                self._submit_form_version(form_id, form_version_id, form_version)
+                form_versions_submitted += 1
             for submission in self.client.submissions(form_id):
                 logical_id = str(submission.get("instanceId") or submission.get("id"))
                 if not logical_id:
@@ -59,7 +70,37 @@ class ProjectAuditor:
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped)
-        return RunSummary(self.project_id, seen, submitted + skipped, submitted, skipped)
+        return RunSummary(self.project_id, seen, submitted + skipped, submitted, skipped, form_versions_submitted)
+
+    def _submit_form_version(self, form_id: str, version_id: str, metadata: dict[str, Any]) -> None:
+        xml = self.client.form_version_bytes(form_id, version_id, "xml")
+        files = {"form.xml": xml}
+        try:
+            files["form.xlsx"] = self.client.form_version_bytes(form_id, version_id, "xlsx")
+        except Exception:
+            pass
+        bundle = _bundle(xml, files, [], [], {"form_version": metadata})
+        audit_id = audit_instance_id(self.project_id, form_id, "form-definition", version_id)
+        fields = {
+            "record_type": "form_version",
+            "project_id": self.project_id,
+            "source_form_id": form_id,
+            "source_instance_id": "form-definition",
+            "source_version_id": version_id,
+            "source_audit_instance_id": audit_id,
+            "source_content_sha256": _sha(xml),
+            "collect_audit_sha256": "",
+            "central_created_at": metadata.get("createdAt") or metadata.get("created_at"),
+            "central_actor_id": metadata.get("actorId") or "",
+            "change_reason": "",
+            "reason_link_status": "not_applicable",
+            "timestamp_status": "not_requested",
+            "timestamp_time": "",
+            "sentinel_run_id": "",
+            "checkpoint_cursor": version_id,
+        }
+        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, fields, "source_bundle.zip"),
+                         {"source_bundle.zip": bundle})
 
     def _existing_audit_ids(self) -> set[str]:
         result: set[str] = set()

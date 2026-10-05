@@ -55,6 +55,13 @@ class CentralClient:
     def submissions(self, form_id: str) -> list[dict[str, Any]]:
         return _items(self.get_json(self._form_path(form_id) + "/submissions"))
 
+    def form_versions(self, form_id: str) -> list[dict[str, Any]]:
+        return _items(self.get_json(self._form_path(form_id) + "/versions"))
+
+    def form_version_bytes(self, form_id: str, version: str, extension: str) -> bytes:
+        path = self._form_path(form_id) + f"/versions/{_quote(version)}.{extension}"
+        return self.get_bytes(path)
+
     def versions(self, form_id: str, instance_id: str) -> list[dict[str, Any]]:
         path = self._submission_path(form_id, instance_id) + "/versions"
         return _items(self.get_json(path))

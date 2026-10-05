@@ -20,6 +20,12 @@ class FakeClient:
             return []
         return [{"instanceId": "uuid:one"}]
 
+    def form_versions(self, form_id):
+        return [{"version": "2026-10-05"}]
+
+    def form_version_bytes(self, form_id, version, extension):
+        return (b"<h:html xmlns:h='http://www.w3.org/1999/xhtml'/>") if extension == "xml" else b"xlsx"
+
     def versions(self, form_id, instance_id):
         return [{"instanceId": "uuid:v1", "createdAt": "2026-10-05T10:00:00Z", "submitterId": "user-1"}]
 
@@ -56,10 +62,11 @@ class CrawlerTests(unittest.TestCase):
         summary = ProjectAuditor(FakeClient(), sink).run()
         self.assertEqual(summary.forms_seen, 1)
         self.assertEqual(summary.versions_submitted, 1)
-        self.assertEqual(len(sink.submissions), 2)
-        self.assertIn(b"linked_central_comment", sink.submissions[0][1])
-        self.assertIn("source_bundle.zip", sink.submissions[0][2])
-        bundle = sink.submissions[0][2]["source_bundle.zip"]
+        self.assertEqual(summary.form_versions_submitted, 1)
+        self.assertEqual(len(sink.submissions), 3)
+        submission = [item for item in sink.submissions if b"linked_central_comment" in item[1]][0]
+        self.assertIn("source_bundle.zip", submission[2])
+        bundle = submission[2]["source_bundle.zip"]
         self.assertIn(b"submission.xml", bundle)
         self.assertIn(b"attachments/audit.csv", bundle)
 
