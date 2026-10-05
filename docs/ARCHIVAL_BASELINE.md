@@ -9,12 +9,12 @@ MethodMesh payload from every XLSForm.
 For every retained ODK Central version of a logical submission, Sentinel:
 
 1. downloads the exact Central submission bytes;
-2. downloads the exact ODK Collect audit trail when present;
-3. downloads the exact attachments;
-4. records the Central version, actor, time, audit events and change reasons;
-5. hashes every archived file independently;
-6. requests or records trusted timestamp evidence for the archived version;
-7. writes a readable, consolidated audit record for the complete version history.
+2. reads the Central audit and change-reason metadata;
+3. records the Central version, actor, time, audit events and change reasons;
+4. hashes the exact submission bytes and audit metadata in memory;
+5. requests or records trusted timestamp evidence for the archived version;
+6. writes a readable, consolidated audit record referring back to the original
+   Central submission UUID.
 
 The archive is byte-preserving. Sentinel does not parse and reserialize the
 submission, apply an XLSForm commitment recipe, reconstruct a canonical
@@ -44,11 +44,9 @@ The local `ArchiveStore` implementation is currently a deterministic test
 harness for the record structure; the Central-backed sink is the required
 production path.
 
-The Central audit record contains one exact source bundle attachment when the
-retention policy requires it. That bundle contains the original submission,
-Collect audit file, and attachments. The audit form therefore becomes the
-durable archive without introducing a second database or a project-specific
-Sentinel installation.
+The Central audit record contains no copy of the source submission or its
+attachments. Central remains the source-data repository; the Sentinel audit
+form is an integrity ledger that stores hashes and references back to Central.
 
 ## Development fixture layout
 
@@ -64,9 +62,8 @@ archive/
       version_manifest.json
 ```
 
-The fixture layout is for local tests only. In production, the same manifest
-and report are submitted to the project audit form and the exact source bundle
-is retained there.
+The fixture layout is for local tests only. In production, the audit fields are
+submitted to the project audit form and the original source remains in Central.
 
 ## XLSForm boundary
 

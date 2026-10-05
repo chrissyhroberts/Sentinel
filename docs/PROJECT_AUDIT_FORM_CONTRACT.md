@@ -21,9 +21,9 @@ project_id + source_form_id + logical_instance_id + source_version_id
 ```
 
 The audit record contains the source identifiers, exact-byte hashes, Central
-metadata, linked audit event/reason information, timestamp evidence, and—when
-retained by policy—one exact source bundle attachment containing the original
-XML, Collect audit file, and attachments.
+metadata, linked audit event/reason information and timestamp evidence. The
+original source data remains in Central and is referenced by its original
+submission UUID; Sentinel does not copy it into the audit form.
 
 The same form also stores one deterministic project checkpoint record. A new
 run reads that checkpoint and the existing audit-form submissions before

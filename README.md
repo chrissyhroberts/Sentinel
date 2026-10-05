@@ -1,11 +1,12 @@
 # Sentinel
 # MethodMesh Governance Sentinel
 
-Sentinel is currently an archival and audit service for ODK Central trial data.
-It preserves the exact original submission, the ODK Collect audit trail, every
-retained Central edit, attachments, Central change reasons and timestamp
-evidence. The current baseline deliberately does not reconstruct canonical
-MethodMesh payloads from XLSForm recipes.
+Sentinel is currently an integrity-ledger and audit service for ODK Central
+trial data. It records hashes and references for the exact original
+submission, every retained Central edit, Central change reasons and timestamp
+evidence. The source data remains in ODK Central; Sentinel does not copy it
+into a second form. The current baseline deliberately does not reconstruct
+canonical MethodMesh payloads from XLSForm recipes.
 
 See [the archival baseline](docs/ARCHIVAL_BASELINE.md) for the governing
 scope, evidence model and archive layout.

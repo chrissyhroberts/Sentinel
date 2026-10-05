@@ -32,12 +32,6 @@ class FakeClient:
     def version_xml(self, form_id, instance_id, version_id):
         return b"<data><meta><instanceID>uuid:one</instanceID></meta></data>"
 
-    def version_metadata(self, form_id, instance_id, version_id):
-        return {"attachments": [{"filename": "audit.csv", "exists": True}]}
-
-    def attachment_bytes(self, form_id, instance_id, version_id, filename):
-        return b"event,timestamp\nform start,2026-10-05T10:00:00Z\n"
-
     def audits(self, form_id, instance_id):
         return [{"action": "submission.create", "versionId": "uuid:v1"}]
 
@@ -70,10 +64,7 @@ class CrawlerTests(unittest.TestCase):
         submission = [item for item in sink.submissions if b"linked_central_comment" in item[1]][0]
         self.assertIn(b'<data id="sentinel_project_audit" version="1"', submission[1])
         self.assertIn(b"<orx:meta><orx:instanceID>", submission[1])
-        self.assertIn("source_bundle.zip", submission[2])
-        bundle = submission[2]["source_bundle.zip"]
-        self.assertIn(b"submission.xml", bundle)
-        self.assertIn(b"attachments/audit.csv", bundle)
+        self.assertEqual(submission[2], {})
 
 
 if __name__ == "__main__":

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import sys
-import zipfile
 from dataclasses import dataclass
 from typing import Any, Protocol
 from xml.sax.saxutils import escape
@@ -92,12 +90,6 @@ class ProjectAuditor:
 
     def _submit_form_version(self, form_id: str, version_id: str, metadata: dict[str, Any]) -> None:
         xml = self.client.form_version_bytes(form_id, version_id, "xml")
-        files = {"form.xml": xml}
-        try:
-            files["form.xlsx"] = self.client.form_version_bytes(form_id, version_id, "xlsx")
-        except Exception:
-            pass
-        bundle = _bundle(xml, files, [], [], {"form_version": metadata})
         audit_id = audit_instance_id(self.project_id, form_id, "form-definition", version_id)
         fields = {
             "record_type": "form_version",
@@ -117,8 +109,7 @@ class ProjectAuditor:
             "sentinel_run_id": "",
             "checkpoint_cursor": version_id,
         }
-        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, fields, "source_bundle.zip"),
-                         {"source_bundle.zip": bundle})
+        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, fields, ""), {})
 
     def _existing_audit_ids(self) -> set[str]:
         result: set[str] = set()
@@ -130,21 +121,8 @@ class ProjectAuditor:
 
     def _submit_version(self, form_id: str, logical_id: str, version_id: str, version: dict[str, Any]) -> None:
         source = self.client.version_xml(form_id, logical_id, version_id)
-        metadata = self.client.version_metadata(form_id, logical_id, version_id)
-        attachments: dict[str, bytes] = {}
-        for item in metadata.get("attachments", []) or []:
-            if not item.get("exists", True):
-                continue
-            filename = str(item.get("filename") or item.get("name") or "")
-            if filename:
-                attachments[filename] = self.client.attachment_bytes(form_id, logical_id, version_id, filename)
         audits = self.client.audits(form_id, logical_id)
         comments = self.client.comments(form_id, logical_id)
-        try:
-            diffs = self.client.diffs(form_id, logical_id)
-        except Exception as error:  # Central installations may not expose diffs.
-            diffs = {"status": "unavailable", "error_class": type(error).__name__}
-        bundle = _bundle(source, attachments, audits, comments, diffs)
         audit_id = audit_instance_id(self.project_id, form_id, logical_id, version_id)
         metadata = {
             "record_type": "submission_version",
@@ -164,8 +142,7 @@ class ProjectAuditor:
             "sentinel_run_id": "",
             "checkpoint_cursor": version_id,
         }
-        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, metadata, "source_bundle.zip"),
-                         {"source_bundle.zip": bundle})
+        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, metadata, ""), {})
 
     def _submit_checkpoint(self, *, forms_seen: int, versions_seen: int) -> None:
         audit_id = checkpoint_instance_id(self.project_id)
@@ -188,19 +165,6 @@ class ProjectAuditor:
             "checkpoint_cursor": str(versions_seen),
         }
         self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, metadata, ""), {})
-
-
-def _bundle(source: bytes, attachments: dict[str, bytes], audits: list[dict[str, Any]],
-            comments: list[dict[str, Any]], diffs: Any) -> bytes:
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("submission.xml", source)
-        for filename, content in attachments.items():
-            archive.writestr("attachments/" + filename.replace("..", "_"), content)
-        archive.writestr("central/audits.json", json.dumps(audits, indent=2, ensure_ascii=False))
-        archive.writestr("central/comments.json", json.dumps(comments, indent=2, ensure_ascii=False))
-        archive.writestr("central/diffs.json", json.dumps(diffs, indent=2, ensure_ascii=False))
-    return output.getvalue()
 
 
 def _audit_xml(instance_id: str, fields: dict[str, str], bundle_name: str) -> bytes:
