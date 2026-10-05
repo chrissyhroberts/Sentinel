@@ -33,6 +33,7 @@ class CentralClient:
         self.token = token or os.environ.get(config.token_env)
         self.base_url = config.base_url.rstrip("/")
         self.debug = debug
+        self._user_cache: dict[str, dict[str, Any] | None] = {}
 
     @classmethod
     def login(cls, config: CentralConfig, email: str, password: str, *, debug: bool = False) -> "CentralClient":
@@ -97,6 +98,34 @@ class CentralClient:
     def submission(self, form_id: str, instance_id: str) -> dict[str, Any]:
         return dict(self.get_json(self._submission_path(form_id, instance_id)))
 
+    def user(self, actor_id: Any) -> dict[str, Any] | None:
+        """Return a Central Web User, cached for the duration of this run.
+
+        App Users and public-link actors are not Web Users and therefore may
+        not have an email address in the Users API.  Callers should treat a
+        missing result as an expected fallback case.
+        """
+        key = str(actor_id or "")
+        if not key:
+            return None
+        if key in self._user_cache:
+            return self._user_cache[key]
+        try:
+            result = dict(self.get_json(f"/v1/users/{_quote(key)}"))
+        except CentralError as error:
+            if "returned HTTP 404" not in str(error):
+                raise
+            result = None
+        self._user_cache[key] = result
+        return result
+
+    def actor_email(self, actor_id: Any) -> str:
+        user = self.user(actor_id)
+        if not user:
+            return ""
+        value = user.get("email") or user.get("emailAddress")
+        return str(value or "")
+
     def version_metadata(self, form_id: str, instance_id: str, version_id: str) -> dict[str, Any]:
         return dict(self.get_json(self._submission_path(form_id, instance_id) + f"/versions/{_quote(version_id)}"))
 
@@ -118,7 +147,11 @@ class CentralClient:
         return self.get_bytes(path)
 
     def audits(self, form_id: str, instance_id: str) -> list[dict[str, Any]]:
-        return _items(self.get_json(self._submission_path(form_id, instance_id) + "/audits"))
+        value = self._request(
+            "GET", self._submission_path(form_id, instance_id) + "/audits",
+            accept="application/json", extra_headers={"X-Extended-Metadata": "true"},
+        )
+        return _items(value)
 
     def comments(self, form_id: str, instance_id: str) -> list[dict[str, Any]]:
         return _items(self.get_json(self._submission_path(form_id, instance_id) + "/comments"))

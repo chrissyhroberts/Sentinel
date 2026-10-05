@@ -33,10 +33,15 @@ class FakeClient:
         return b"<data><meta><instanceID>uuid:one</instanceID></meta></data>"
 
     def audits(self, form_id, instance_id):
-        return [{"action": "submission.create", "versionId": "uuid:v1"}]
+        return [{"action": "submission.update", "details": {
+            "versionId": "uuid:v1", "actionNotes": "corrected source value"
+        }}]
 
     def comments(self, form_id, instance_id):
-        return [{"versionId": "uuid:v1", "body": "corrected source value"}]
+        return [{"body": "unlinked submission comment"}]
+
+    def actor_email(self, actor_id):
+        return "user@example.org" if actor_id == "user-1" else ""
 
     def diffs(self, form_id, instance_id):
         return {"versions": []}
@@ -60,8 +65,14 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(summary.forms_seen, 1)
         self.assertEqual(summary.versions_submitted, 1)
         self.assertEqual(summary.form_versions_submitted, 1)
-        self.assertEqual(len(sink.submissions), 3)
-        submission = [item for item in sink.submissions if b"linked_central_comment" in item[1]][0]
+        self.assertEqual(len(sink.submissions), 4)
+        submission = [item for item in sink.submissions if b"linked_central_audit" in item[1]][0]
+        self.assertIn(b"<record_type>submission_edit</record_type>", submission[1])
+        self.assertIn(b"<central_actor_id>user@example.org</central_actor_id>", submission[1])
+        self.assertIn(b"<change_reason>corrected source value</change_reason>", submission[1])
+        manifest = [item for item in sink.submissions if b"<record_type>run_timestamp_manifest</record_type>" in item[1]][0]
+        self.assertEqual(set(manifest[2]), {"timestamp_manifest.json"})
+        self.assertIn(b"submission_edit", manifest[2]["timestamp_manifest.json"])
         self.assertIn(b'<data id="sentinel_project_audit" version="1"', submission[1])
         self.assertIn(b"<orx:meta><orx:instanceID>", submission[1])
         self.assertEqual(submission[2], {})

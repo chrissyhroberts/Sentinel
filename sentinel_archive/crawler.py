@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Protocol
 from xml.sax.saxutils import escape
@@ -78,9 +79,11 @@ class ProjectAuditor:
 
     def run(self, plan: AuditPlan | None = None) -> RunSummary:
         plan = plan or self.plan()
+        run_id = _run_id()
         completed = set(plan.existing_audit_ids)
         forms = plan.forms
         seen = submitted = skipped = form_versions_submitted = 0
+        run_records: list[dict[str, Any]] = []
         seen = len(forms)
         for kind, form_id, logical_id, version_id, metadata in plan.tasks:
             record_id = audit_instance_id(self.project_id, form_id, logical_id, version_id)
@@ -92,27 +95,47 @@ class ProjectAuditor:
                 print(f"[debug] archiving {kind}: {label}", file=sys.stderr)
             try:
                 if kind == "form_version":
-                    self._submit_form_version(form_id, version_id, metadata)
+                    fields = self._submit_form_version(form_id, version_id, metadata, run_id)
                     form_versions_submitted += 1
                 else:
-                    self._submit_version(form_id, logical_id, version_id, metadata)
+                    fields = self._submit_version(form_id, logical_id, version_id, metadata, run_id)
                     submitted += 1
+                run_records.append({
+                    "audit_instance_id": record_id,
+                    "record_type": fields["record_type"],
+                    "status": "submitted",
+                    "source_form_id": form_id,
+                    "source_instance_id": logical_id,
+                    "source_version_id": version_id,
+                    "source_content_sha256": fields["source_content_sha256"],
+                })
             except CentralError as error:
                 if not _is_existing_record(error):
                     raise
                 skipped += 1
+                run_records.append({
+                    "audit_instance_id": record_id,
+                    "record_type": "source_form_version" if kind == "form_version" else (
+                        "original_submission" if version_id == logical_id else "submission_edit"
+                    ),
+                    "status": "already_present",
+                    "source_form_id": form_id,
+                    "source_instance_id": logical_id,
+                    "source_version_id": version_id,
+                })
                 if getattr(self.client, "debug", False):
                     print("[debug] Central already has this audit record; continuing", file=sys.stderr)
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
-            self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped)
+            self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped, run_id=run_id)
+        self._submit_run_manifest(run_id, run_records)
         return RunSummary(self.project_id, seen, submitted + skipped, submitted, skipped, form_versions_submitted)
 
-    def _submit_form_version(self, form_id: str, version_id: str, metadata: dict[str, Any]) -> None:
+    def _submit_form_version(self, form_id: str, version_id: str, metadata: dict[str, Any], run_id: str) -> dict[str, str]:
         xml = self.client.form_version_bytes(form_id, version_id, "xml")
         audit_id = audit_instance_id(self.project_id, form_id, "form-definition", version_id)
         fields = {
-            "record_type": "form_version",
+            "record_type": "source_form_version",
             "project_id": self.project_id,
             "source_form_id": form_id,
             "source_instance_id": "form-definition",
@@ -121,7 +144,7 @@ class ProjectAuditor:
             "source_content_sha256": _sha(xml),
             "collect_audit_sha256": "",
             "central_created_at": metadata.get("createdAt") or metadata.get("created_at"),
-            "central_actor_id": metadata.get("actorId") or "",
+            "central_actor_id": self._actor_email(metadata.get("actorId")) or metadata.get("actorId") or "",
             "change_reason": "",
             "reason_link_status": "not_applicable",
             "timestamp_status": "not_requested",
@@ -132,9 +155,11 @@ class ProjectAuditor:
             "sentinel_run_id": "",
             "checkpoint_cursor": version_id,
         }
+        fields["sentinel_run_id"] = run_id
         form_version = getattr(self.client.config, "audit_form_version", "1")
         self.sink.submit(self.client.config.audit_form_id, _audit_xml(
             audit_id, fields, form_version, self.client.config.audit_form_id), {})
+        return fields
 
     def _existing_audit_ids(self) -> set[str]:
         result: set[str] = set()
@@ -144,13 +169,15 @@ class ProjectAuditor:
                 result.add(str(value))
         return result
 
-    def _submit_version(self, form_id: str, logical_id: str, version_id: str, version: dict[str, Any]) -> None:
+    def _submit_version(self, form_id: str, logical_id: str, version_id: str,
+                        version: dict[str, Any], run_id: str) -> dict[str, str]:
         source = self.client.version_xml(form_id, logical_id, version_id)
         audits = self.client.audits(form_id, logical_id)
-        comments = self.client.comments(form_id, logical_id)
         audit_id = audit_instance_id(self.project_id, form_id, logical_id, version_id)
+        actor_id = version.get("actorId") or version.get("submitterId")
+        is_edit = version_id != logical_id
         metadata = {
-            "record_type": "submission_version",
+            "record_type": "submission_edit" if is_edit else "original_submission",
             "project_id": self.project_id,
             "source_form_id": form_id,
             "source_instance_id": logical_id,
@@ -159,22 +186,29 @@ class ProjectAuditor:
             "source_content_sha256": _sha(source),
             "collect_audit_sha256": _sha_json(audits),
             "central_created_at": version.get("createdAt") or version.get("created_at"),
-            "central_actor_id": version.get("actorId") or version.get("submitterId"),
-            "change_reason": _reason(comments, version_id),
-            "reason_link_status": _reason_status(comments, version_id),
+            "central_actor_id": self._actor_email(actor_id) or actor_id,
+            "change_reason": _reason(audits, version_id, version, logical_id),
+            "reason_link_status": _reason_status(audits, version_id, version, logical_id),
             "timestamp_status": "not_requested",
             "timestamp_time": "",
             "timestamp_batch_id": "",
             "timestamp_batch_sha256": "",
             "timestamp_token": "",
-            "sentinel_run_id": "",
+            "sentinel_run_id": run_id,
             "checkpoint_cursor": version_id,
         }
         form_version = getattr(self.client.config, "audit_form_version", "1")
         self.sink.submit(self.client.config.audit_form_id, _audit_xml(
             audit_id, metadata, form_version, self.client.config.audit_form_id), {})
+        return metadata
 
-    def _submit_checkpoint(self, *, forms_seen: int, versions_seen: int) -> None:
+    def _actor_email(self, actor_id: Any) -> str:
+        resolver = getattr(self.client, "actor_email", None)
+        if resolver is None:
+            return ""
+        return str(resolver(actor_id) or "")
+
+    def _submit_checkpoint(self, *, forms_seen: int, versions_seen: int, run_id: str) -> None:
         audit_id = checkpoint_instance_id(self.project_id)
         metadata = {
             "record_type": "project_checkpoint",
@@ -194,12 +228,58 @@ class ProjectAuditor:
             "timestamp_batch_id": "",
             "timestamp_batch_sha256": "",
             "timestamp_token": "",
-            "sentinel_run_id": "",
+            "sentinel_run_id": run_id,
             "checkpoint_cursor": str(versions_seen),
         }
         self.sink.submit(self.client.config.audit_form_id, _audit_xml(
             audit_id, metadata, getattr(self.client.config, "audit_form_version", "1"),
             self.client.config.audit_form_id), {})
+
+    def _submit_run_manifest(self, run_id: str, records: list[dict[str, Any]]) -> None:
+        manifest = {
+            "schema": "methodmesh.sentinel.run_timestamp_manifest.v1",
+            "project_id": self.project_id,
+            "run_id": run_id,
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "record_types": {
+                "source_form_version": "A deployed source-form definition version",
+                "original_submission": "The original Central submission version",
+                "submission_edit": "A later Central-retained edit of a submission",
+                "project_checkpoint": "The project crawl checkpoint",
+                "run_timestamp_manifest": "The manifest for this Sentinel run",
+            },
+            "records": records,
+        }
+        manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
+        manifest_hash = _sha(manifest_bytes)
+        audit_id = run_manifest_instance_id(self.project_id, run_id)
+        fields = {
+            "record_type": "run_timestamp_manifest",
+            "project_id": self.project_id,
+            "source_form_id": "",
+            "source_instance_id": "",
+            "source_version_id": "",
+            "source_audit_instance_id": audit_id,
+            "source_content_sha256": "",
+            "collect_audit_sha256": "",
+            "central_created_at": manifest["created_at"],
+            "central_actor_id": "",
+            "change_reason": "Sentinel run manifest",
+            "reason_link_status": "sentinel_run_manifest",
+            "timestamp_status": "manifest_created_not_timestamped",
+            "timestamp_time": "",
+            "timestamp_batch_id": run_id,
+            "timestamp_batch_sha256": manifest_hash,
+            "timestamp_token": "",
+            "sentinel_run_id": run_id,
+            "checkpoint_cursor": str(len(records)),
+        }
+        self.sink.submit(
+            self.client.config.audit_form_id,
+            _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
+                       self.client.config.audit_form_id),
+            {"timestamp_manifest.json": manifest_bytes},
+        )
 
 
 def _audit_xml(instance_id: str, fields: dict[str, str], form_version: str,
@@ -229,15 +309,83 @@ def _sha_json(value: Any) -> str:
     return _sha(json.dumps(value, sort_keys=True, ensure_ascii=False).encode())
 
 
-def _reason(comments: list[dict[str, Any]], version_id: str) -> str:
-    linked = [c.get("body", "") for c in comments if c.get("versionId") == version_id or c.get("version_id") == version_id]
-    return " | ".join(str(value) for value in linked if value)
+def _run_id() -> str:
+    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"sentinel-run-{now}"
 
 
-def _reason_status(comments: list[dict[str, Any]], version_id: str) -> str:
-    if any(c.get("versionId") == version_id or c.get("version_id") == version_id for c in comments):
-        return "linked_central_comment"
-    return "no_linked_reason_recorded"
+def run_manifest_instance_id(project_id: str, run_id: str) -> str:
+    material = f"run-manifest\x1f{project_id}\x1f{run_id}".encode()
+    return "uuid:sentinel-manifest-" + hashlib.sha256(material).hexdigest()[:39]
+
+
+def _reason(audits: list[dict[str, Any]], version_id: str, version: dict[str, Any], logical_id: str) -> str:
+    """Extract an edit note from the Central audit event for this version.
+
+    Central comments are submission-level and do not identify a version.  The
+    server audit event is the record that can be linked to an edit, commonly
+    through details.versionId and/or an action note.
+    """
+    values: list[str] = []
+    for event in audits:
+        if not _audit_event_matches(event, version_id, version, logical_id):
+            continue
+        for value in _note_values(event):
+            if value and value not in values:
+                values.append(value)
+    return " | ".join(values)
+
+
+def _reason_status(audits: list[dict[str, Any]], version_id: str, version: dict[str, Any], logical_id: str) -> str:
+    if version_id == logical_id:
+        return "not_applicable"
+    if _reason(audits, version_id, version, logical_id):
+        return "linked_central_audit"
+    if any(_audit_event_matches(event, version_id, version, logical_id) for event in audits):
+        return "edit_reason_not_recorded"
+    return "no_linked_edit_audit"
+
+
+def _audit_event_matches(event: dict[str, Any], version_id: str, version: dict[str, Any], logical_id: str) -> bool:
+    if version_id == logical_id:
+        return str(event.get("action", "")).lower() in {"submission.create", "submission.create.version"}
+    references = _referenced_values(event)
+    if version_id in references:
+        return True
+    action = str(event.get("action", "")).lower()
+    return "submission.update" in action or action in {"submission.edit", "submission.version.create"}
+
+
+def _referenced_values(value: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_lower = str(key).lower().replace("_", "")
+            if key_lower in {"versionid", "submissionversionid", "newversionid", "instanceid", "newinstanceid"}:
+                if child is not None:
+                    found.add(str(child))
+            found.update(_referenced_values(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.update(_referenced_values(child))
+    return found
+
+
+def _note_values(event: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    keys = {"reason", "note", "notes", "actionnotes", "changereason", "comment"}
+
+    def visit(value: Any, key: str = "") -> None:
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                visit(child, str(child_key).lower().replace("_", ""))
+        elif key in keys and value not in (None, ""):
+            text = str(value)
+            if text not in values:
+                values.append(text)
+
+    visit(event)
+    return values
 
 
 def _is_existing_record(error: CentralError) -> bool:

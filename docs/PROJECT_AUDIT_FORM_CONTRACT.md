@@ -30,6 +30,24 @@ metadata, linked audit event/reason information and timestamp evidence. The
 original source data remains in Central and is referenced by its original
 submission UUID; Sentinel does not copy it into the audit form.
 
+`record_type` is deliberately human-readable:
+
+| Value | Meaning |
+|---|---|
+| `source_form_version` | A published version of a source form |
+| `original_submission` | The original retained Central submission version |
+| `submission_edit` | A later retained Central edit of that submission |
+| `project_checkpoint` | The crawl checkpoint for the configured project |
+| `run_timestamp_manifest` | The manifest covering one Sentinel run |
+
+Each run also creates a `run_timestamp_manifest` record. Its
+`timestamp_batch_sha256` is the SHA-256 of the attached `timestamp_manifest.json`,
+and `timestamp_batch_id` links the audit record to the manifest and to the
+`sentinel_run_id` values on records processed in that run. The current Sentinel
+implementation creates and preserves this batch evidence but does not itself
+call an RFC3161 authority; until a timestamp provider is configured, its status
+is explicitly `manifest_created_not_timestamped`.
+
 The same form also stores one deterministic project checkpoint record. A new
 run reads that checkpoint and the existing audit-form submissions before
 fetching work, so completed versions are not repeated.
