@@ -27,9 +27,19 @@ class CentralClient:
     def __init__(self, config: CentralConfig, token: str | None = None):
         self.config = config
         self.token = token or os.environ.get(config.token_env)
-        if not self.token:
-            raise CentralError(f"Central token is not set; use ${config.token_env}")
         self.base_url = config.base_url.rstrip("/")
+
+    @classmethod
+    def login(cls, config: CentralConfig, email: str, password: str) -> "CentralClient":
+        client = cls(config, token="session-login")
+        response = client._request(
+            "POST", "/v1/sessions", accept="application/json",
+            json_body={"email": email, "password": password},
+        )
+        token = response.get("token") if isinstance(response, dict) else None
+        if not token:
+            raise CentralError("Central login did not return a session token")
+        return cls(config, token=str(token))
 
     def get_json(self, path: str) -> Any:
         return self._request("GET", path, accept="application/json")
@@ -94,9 +104,15 @@ class CentralClient:
         return self._form_path(form_id) + f"/submissions/{_quote(instance_id)}"
 
     def _request(self, method: str, path: str, *, accept: str, raw: bool = False,
-                 multipart: dict[str, tuple[str, bytes, str]] | None = None) -> Any:
+                 multipart: dict[str, tuple[str, bytes, str]] | None = None,
+                 json_body: dict[str, Any] | None = None) -> Any:
         body = None
-        headers = {"Accept": accept, "Authorization": f"Bearer {self.token}"}
+        headers = {"Accept": accept}
+        if self.token and self.token != "session-login":
+            headers["Authorization"] = f"Bearer {self.token}"
+        if json_body is not None:
+            body = json.dumps(json_body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
         if multipart is not None:
             boundary = "----SentinelBoundary7d3c4f"
             headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"

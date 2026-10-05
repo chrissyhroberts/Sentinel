@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import os
 from pathlib import Path
 
 from .central import CentralClient, CentralConfig
@@ -13,11 +15,17 @@ def main() -> None:
     parser.add_argument("config", type=Path, help="JSON config containing base_url, project_id and audit_form_id")
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding="utf-8"))
-    client = CentralClient(CentralConfig(
+    central_config = CentralConfig(
         base_url=config["base_url"],
         project_id=str(config["project_id"]),
         audit_form_id=config.get("audit_form_id", "sentinel_project_audit"),
         token_env=config.get("token_env", "ODK_CENTRAL_TOKEN"),
-    ))
+    )
+    email = config.get("email")
+    if email and not os.environ.get(central_config.token_env):
+        password = getpass.getpass(f"Central password for {email}: ")
+        client = CentralClient.login(central_config, email, password)
+    else:
+        client = CentralClient(central_config)
     summary = ProjectAuditor(client).run()
     print(json.dumps(summary.__dict__, indent=2))

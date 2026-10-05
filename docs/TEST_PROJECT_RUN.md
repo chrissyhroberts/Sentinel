@@ -8,12 +8,16 @@ audit form, then create a local configuration file outside the repository:
 {
   "base_url": "https://central.example.org",
   "project_id": "123",
+  "email": "your-central-email@example.org",
   "audit_form_id": "sentinel_project_audit",
   "token_env": "ODK_CENTRAL_TOKEN"
 }
 ```
 
-Set the bearer token in the named environment variable and run:
+With `email` present and no token environment variable set, Sentinel prompts
+for the password without echoing it, creates a Central session, and keeps the
+session token in memory for that run. It does not save the password or token.
+Alternatively, set the named bearer token in the environment and run:
 
 ```sh
 python -m sentinel_archive.cli /private/path/sentinel-project.json
