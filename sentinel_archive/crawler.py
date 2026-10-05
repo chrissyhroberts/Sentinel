@@ -43,6 +43,7 @@ class ProjectAuditor:
         self.client = client
         self.sink = sink or client
         self.project_id = client.config.project_id
+        self._comment_reasons: dict[tuple[str, str, str], str] = {}
 
     def plan(self) -> AuditPlan:
         all_forms = self.client.forms()
@@ -82,6 +83,7 @@ class ProjectAuditor:
 
     def run(self, plan: AuditPlan | None = None) -> RunSummary:
         plan = plan or self.plan()
+        self._prepare_comment_stack(plan)
         run_id = _run_id()
         completed = set(plan.existing_audit_ids)
         forms = plan.forms
@@ -197,7 +199,8 @@ class ProjectAuditor:
         change_summary = _change_summary(diffs, version_id)
         collect_reason = _collect_reason(collect_audit)
         central_reason = _reason(audits, version_id, version, logical_id)
-        reason = _combine_reason(change_summary, collect_reason or central_reason)
+        comment_reason = self._comment_reasons.get((form_id, logical_id, version_id), "")
+        reason = _combine_reason(change_summary, collect_reason or central_reason or comment_reason)
         metadata = {
             "record_type": "submission_edit" if is_edit else "original_submission",
             "project_id": self.project_id,
@@ -213,6 +216,7 @@ class ProjectAuditor:
             "reason_link_status": _reason_status(
                 audits, version_id, version, logical_id,
                 collect_reason=bool(collect_reason), change_summary=bool(change_summary),
+                comment_reason=bool(comment_reason and not (collect_reason or central_reason)),
             ),
             "timestamp_status": "not_requested",
             "timestamp_time": "",
@@ -229,6 +233,27 @@ class ProjectAuditor:
         self.sink.submit(self.client.config.audit_form_id, _audit_xml(
             audit_id, metadata, form_version, self.client.config.audit_form_id), {})
         return metadata
+
+    def _prepare_comment_stack(self, plan: AuditPlan) -> None:
+        """Pair newest Central comments with newest edits per submission."""
+        groups: dict[tuple[str, str], list[tuple[str, dict[str, Any]]]] = {}
+        for kind, form_id, logical_id, version_id, version in plan.tasks:
+            if kind == "submission_version" and version_id != logical_id:
+                groups.setdefault((form_id, logical_id), []).append((version_id, version))
+        for (form_id, logical_id), versions in groups.items():
+            comments = self.client.comments(form_id, logical_id)
+            bodies: list[str] = []
+            for comment in comments:
+                body = str(comment.get("body") or "").strip()
+                if body and body not in bodies:
+                    bodies.append(body)
+            if not bodies:
+                continue
+            minimum = datetime.min.replace(tzinfo=timezone.utc)
+            versions.sort(key=lambda item: _event_time(item[1]) or minimum, reverse=True)
+            for index, (version_id, _version) in enumerate(versions):
+                # One comment may cover several subsequent edits.
+                self._comment_reasons[(form_id, logical_id, version_id)] = bodies[min(index, len(bodies) - 1)]
 
     def _actor_email(self, actor_id: Any) -> str:
         resolver = getattr(self.client, "actor_email", None)
@@ -442,13 +467,16 @@ def _event_time(value: dict[str, Any]) -> datetime | None:
 
 
 def _reason_status(audits: list[dict[str, Any]], version_id: str, version: dict[str, Any], logical_id: str,
-                   *, collect_reason: bool = False, change_summary: bool = False) -> str:
+                   *, collect_reason: bool = False, change_summary: bool = False,
+                   comment_reason: bool = False) -> str:
     if version_id == logical_id:
         return "not_applicable"
     if collect_reason:
         return "linked_collect_audit"
     if _reason(audits, version_id, version, logical_id):
         return "linked_central_audit"
+    if comment_reason:
+        return "unlinked_central_comment"
     if change_summary:
         return "edit_recorded_reason_missing"
     if any(_audit_event_matches(event, version_id, version, logical_id) for event in audits):
