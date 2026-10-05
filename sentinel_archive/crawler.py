@@ -202,8 +202,9 @@ def _bundle(source: bytes, attachments: dict[str, bytes], audits: list[dict[str,
 def _audit_xml(instance_id: str, fields: dict[str, str], bundle_name: str) -> bytes:
     values = "".join(f"<{key}>{escape(str(value or ''))}</{key}>" for key, value in fields.items())
     values += f"<source_bundle>{escape(bundle_name)}</source_bundle>"
-    return (f'<?xml version="1.0" encoding="UTF-8"?><data id="sentinel_project_audit" version="1">'
-            f"{values}<meta><instanceID>{escape(instance_id)}</instanceID><formVersion>1</formVersion></meta></data>").encode()
+    return (f'<?xml version="1.0" encoding="UTF-8"?><data id="sentinel_project_audit" version="1" '
+            'xmlns:orx="http://openrosa.org/xforms">'
+            f"{values}<orx:meta><orx:instanceID>{escape(instance_id)}</orx:instanceID></orx:meta></data>").encode()
 
 
 def _sha(value: bytes) -> str:
