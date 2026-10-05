@@ -22,6 +22,7 @@ def main() -> None:
         base_url=config["base_url"],
         project_id=str(config["project_id"]),
         audit_form_id=config.get("audit_form_id", "sentinel_project_audit"),
+        audit_form_version=str(config.get("audit_form_version", "1")),
         token_env=config.get("token_env", "ODK_CENTRAL_TOKEN"),
     )
     email = config.get("email")

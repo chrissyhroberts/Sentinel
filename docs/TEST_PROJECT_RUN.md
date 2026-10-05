@@ -1,6 +1,6 @@
 # Test-project run
 
-Publish `docs/sentinel_project_audit_v1.xml` in the selected Central project,
+Publish `docs/sentinel_project_audit_v2.xlsx` in the selected Central project,
 give the Sentinel account read access to source forms and submit access to the
 audit form, then create a local configuration file outside the repository:
 
@@ -10,6 +10,7 @@ audit form, then create a local configuration file outside the repository:
   "project_id": "123",
   "email": "your-central-email@example.org",
   "audit_form_id": "sentinel_project_audit",
+  "audit_form_version": "2",
   "token_env": "ODK_CENTRAL_TOKEN"
 }
 ```
@@ -25,10 +26,10 @@ python -m sentinel_archive.cli /private/path/sentinel-project.json
 
 The crawler excludes only the configured audit form itself, walks every other
 form and retained submission version, and submits one audit record per version
-plus one project checkpoint. It keeps the source XML, Central audit data,
-comments and diffs in memory while creating one exact source bundle. It does
-not write raw data to the local filesystem.
+plus one project checkpoint. It hashes the source XML in memory and submits
+only hashes, references and Central metadata. It does not write raw data to
+the local filesystem or copy source bundles into the audit form.
 
 The first run should use a synthetic or dedicated test project. Confirm the
-audit form accepts the binary source bundle and that a second run reports no
-new versions before using a production study.
+audit form opens in Enketo and that a second run reports no new versions before
+using a production study.

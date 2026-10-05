@@ -5,10 +5,15 @@ same Sentinel code and the same audit form can be used on any Central install;
 only Central connection settings, the project allowlist, and the published
 audit-form identifier are configuration.
 
-The universal form is [sentinel_project_audit_v1.xml](sentinel_project_audit_v1.xml).
+The current universal form is [sentinel_project_audit_v2.xlsx](sentinel_project_audit_v2.xlsx).
 Publish it once in each audited project. Sentinel needs read permission on the
 project's source forms and submit permission on this audit form. It never edits
 or deletes source submissions.
+
+When version 2 is published, set `audit_form_version` to `2` in the local
+Sentinel configuration. Version 2 contains the ledger fields and batch
+timestamp fields, including the RFC3161 token upload. It does not contain a
+source-data bundle field.
 
 ## One project-level ledger
 

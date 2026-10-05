@@ -109,7 +109,8 @@ class ProjectAuditor:
             "sentinel_run_id": "",
             "checkpoint_cursor": version_id,
         }
-        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, fields, ""), {})
+        form_version = getattr(self.client.config, "audit_form_version", "1")
+        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, fields, form_version), {})
 
     def _existing_audit_ids(self) -> set[str]:
         result: set[str] = set()
@@ -142,7 +143,8 @@ class ProjectAuditor:
             "sentinel_run_id": "",
             "checkpoint_cursor": version_id,
         }
-        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, metadata, ""), {})
+        form_version = getattr(self.client.config, "audit_form_version", "1")
+        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, metadata, form_version), {})
 
     def _submit_checkpoint(self, *, forms_seen: int, versions_seen: int) -> None:
         audit_id = checkpoint_instance_id(self.project_id)
@@ -167,12 +169,16 @@ class ProjectAuditor:
         self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, metadata, ""), {})
 
 
-def _audit_xml(instance_id: str, fields: dict[str, str], bundle_name: str) -> bytes:
-    values = "".join(f"<{key}>{escape(str(value or ''))}</{key}>" for key, value in fields.items())
-    values += f"<source_bundle>{escape(bundle_name)}</source_bundle>"
-    return (f'<?xml version="1.0" encoding="UTF-8"?><data id="sentinel_project_audit" version="1" '
+def _audit_xml(instance_id: str, fields: dict[str, str], form_version: str) -> bytes:
+    values = "".join(f"<{key}>{escape(_xml_safe(value))}</{key}>" for key, value in fields.items())
+    return (f'<?xml version="1.0" encoding="UTF-8"?><data id="sentinel_project_audit" version="{escape(form_version)}" '
             'xmlns:orx="http://openrosa.org/xforms">'
-            f"{values}<orx:meta><orx:instanceID>{escape(instance_id)}</orx:instanceID></orx:meta></data>").encode()
+            f"{values}<orx:meta><orx:instanceID>{escape(_xml_safe(instance_id))}</orx:instanceID></orx:meta></data>").encode()
+
+
+def _xml_safe(value: Any) -> str:
+    text = str(value or "")
+    return "".join(character for character in text if character in "\t\n\r" or ord(character) >= 0x20)
 
 
 def _sha(value: bytes) -> str:

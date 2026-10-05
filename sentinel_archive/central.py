@@ -21,6 +21,7 @@ class CentralConfig:
     base_url: str
     project_id: str
     audit_form_id: str = "sentinel_project_audit"
+    audit_form_version: str = "1"
     token_env: str = "ODK_CENTRAL_TOKEN"
 
 
