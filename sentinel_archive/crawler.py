@@ -189,7 +189,6 @@ class ProjectAuditor:
                         version: dict[str, Any], run_id: str) -> dict[str, str]:
         source = self.client.version_xml(form_id, logical_id, version_id)
         audits = self.client.audits(form_id, logical_id)
-        comments = self.client.comments(form_id, logical_id)
         diffs = self.client.diffs(form_id, logical_id) if is_edit_candidate(version_id, logical_id) else {}
         collect_audit = _collect_audit_bytes(self.client, form_id, logical_id, version_id)
         audit_id = audit_instance_id(self.project_id, form_id, logical_id, version_id)
@@ -198,8 +197,7 @@ class ProjectAuditor:
         change_summary = _change_summary(diffs, version_id)
         collect_reason = _collect_reason(collect_audit)
         central_reason = _reason(audits, version_id, version, logical_id)
-        comment_reason = _comment_reason(comments) if is_edit else ""
-        reason = _combine_reason(change_summary, collect_reason or central_reason or comment_reason)
+        reason = _combine_reason(change_summary, collect_reason or central_reason)
         metadata = {
             "record_type": "submission_edit" if is_edit else "original_submission",
             "project_id": self.project_id,
@@ -215,7 +213,6 @@ class ProjectAuditor:
             "reason_link_status": _reason_status(
                 audits, version_id, version, logical_id,
                 collect_reason=bool(collect_reason), change_summary=bool(change_summary),
-                comment_reason=bool(comment_reason and not (collect_reason or central_reason)),
             ),
             "timestamp_status": "not_requested",
             "timestamp_time": "",
@@ -397,16 +394,13 @@ def _reason(audits: list[dict[str, Any]], version_id: str, version: dict[str, An
 
 
 def _reason_status(audits: list[dict[str, Any]], version_id: str, version: dict[str, Any], logical_id: str,
-                   *, collect_reason: bool = False, change_summary: bool = False,
-                   comment_reason: bool = False) -> str:
+                   *, collect_reason: bool = False, change_summary: bool = False) -> str:
     if version_id == logical_id:
         return "not_applicable"
     if collect_reason:
         return "linked_collect_audit"
     if _reason(audits, version_id, version, logical_id):
         return "linked_central_audit"
-    if comment_reason:
-        return "unlinked_central_comment"
     if change_summary:
         return "edit_recorded_reason_missing"
     if any(_audit_event_matches(event, version_id, version, logical_id) for event in audits):
@@ -489,23 +483,6 @@ def _collect_reason(data: bytes) -> str:
         if value and value not in reasons:
             reasons.append(value)
     return " | ".join(reasons)
-
-
-def _comment_reason(comments: list[dict[str, Any]]) -> str:
-    """Return one best-effort comment for this edit.
-
-    Central comments are submission-level and have no version identifier.  The
-    endpoint returns them in creation order in current Central releases, so
-    the last non-empty comment is the least-wrong association for the version
-    being processed.  Do not flatten the entire submission conversation into
-    every edit record.
-    """
-    values: list[str] = []
-    for comment in comments:
-        body = str(comment.get("body") or "").strip()
-        if body and body not in values:
-            values.append(body)
-    return values[-1] if values else ""
 
 
 def _change_summary(diffs: Any, version_id: str) -> str:
