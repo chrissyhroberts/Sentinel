@@ -12,7 +12,7 @@ audit form, then create a local configuration file outside the repository:
   "audit_form_id": "sentinel_project_audit",
   "audit_form_version": "1",
   "timestamp_policy": "preferred",
-  "timestamp_url": "https://tsa.opentsa.org:8443/tsa",
+  "timestamp_url": "https://tsr.open-tsa.eu",
   "token_env": "ODK_CENTRAL_TOKEN"
 }
 ```

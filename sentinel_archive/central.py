@@ -25,7 +25,7 @@ class CentralConfig:
     audit_form_version: str = "1"
     token_env: str = "ODK_CENTRAL_TOKEN"
     timestamp_policy: str = "preferred"
-    timestamp_url: str = "https://tsa.opentsa.org:8443/tsa"
+    timestamp_url: str = "https://tsr.open-tsa.eu"
 
 
 class CentralClient:

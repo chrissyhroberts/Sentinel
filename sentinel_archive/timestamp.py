@@ -31,6 +31,7 @@ def timestamp_manifest(data: bytes, url: str, timeout: int = 60) -> TimestampEvi
         payload = root / "manifest.bin"
         query = root / "request.tsq"
         response = root / "response.tsr"
+        token_der = root / "token.der"
         payload.write_bytes(data)
         _openssl(["ts", "-query", "-data", str(payload), "-sha256", "-cert", "-out", str(query)])
         request = urllib.request.Request(
@@ -53,7 +54,8 @@ def timestamp_manifest(data: bytes, url: str, timeout: int = 60) -> TimestampEvi
             raise TimestampError("TSA response imprint does not match the manifest")
         certificate = b""
         try:
-            certificate = _openssl_bytes(["pkcs7", "-inform", "DER", "-in", str(response), "-print_certs"])
+            _openssl(["ts", "-reply", "-in", str(response), "-token_out", "-out", str(token_der)])
+            certificate = _openssl_bytes(["pkcs7", "-inform", "DER", "-in", str(token_der), "-print_certs"])
         except TimestampError:
             # The RFC3161 token remains the authoritative evidence attachment.
             pass
@@ -82,10 +84,17 @@ def _openssl_bytes(arguments: list[str]) -> bytes:
 
 
 def _message_hash(text: str) -> str:
-    match = re.search(r"Message data:.*?Hash:\s*([0-9A-Fa-f]+)", text, re.DOTALL)
-    if not match:
+    section_match = re.search(r"Message data:\s*(.*?)\nSerial number:", text, re.DOTALL)
+    if not section_match:
         raise TimestampError("TSA response did not expose a message imprint")
-    return match.group(1).lower()
+    octets: list[str] = []
+    for line in section_match.group(1).splitlines():
+        match = re.match(r"\s*[0-9A-Fa-f]{4}\s+-\s+([0-9A-Fa-f\s-]+?)\s{2,}", line)
+        if match:
+            octets.extend(re.findall(r"[0-9A-Fa-f]{2}", match.group(1)))
+    if not octets:
+        raise TimestampError("TSA response did not expose a message imprint")
+    return "".join(octets).lower()
 
 
 def _timestamp_time(text: str) -> str:
