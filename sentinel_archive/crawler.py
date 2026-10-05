@@ -189,7 +189,7 @@ def _audit_xml(instance_id: str, fields: dict[str, str], bundle_name: str) -> by
     values = "".join(f"<{key}>{escape(str(value or ''))}</{key}>" for key, value in fields.items())
     values += f"<source_bundle>{escape(bundle_name)}</source_bundle>"
     return (f'<?xml version="1.0" encoding="UTF-8"?><data id="sentinel_project_audit">'
-            f"{values}<meta><instanceID>{escape(instance_id)}</instanceID></meta></data>").encode()
+            f"{values}<meta><instanceID>{escape(instance_id)}</instanceID><formVersion>1</formVersion></meta></data>").encode()
 
 
 def _sha(value: bytes) -> str:

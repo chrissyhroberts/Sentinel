@@ -65,6 +65,7 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(summary.form_versions_submitted, 1)
         self.assertEqual(len(sink.submissions), 3)
         submission = [item for item in sink.submissions if b"linked_central_comment" in item[1]][0]
+        self.assertIn(b"<formVersion>1</formVersion>", submission[1])
         self.assertIn("source_bundle.zip", submission[2])
         bundle = submission[2]["source_bundle.zip"]
         self.assertIn(b"submission.xml", bundle)

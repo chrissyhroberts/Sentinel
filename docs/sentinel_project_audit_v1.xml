@@ -25,7 +25,7 @@
           <sentinel_run_id/>
           <checkpoint_cursor/>
           <source_bundle/>
-          <meta><instanceID/></meta>
+          <meta><instanceID/><formVersion/></meta>
         </data>
       </instance>
       <bind nodeset="/data/record_type" type="string" required="true()"/>
@@ -47,6 +47,8 @@
       <bind nodeset="/data/source_bundle" type="binary"/>
       <bind nodeset="/data/meta/instanceID" type="string" readonly="true()"
         calculate="concat('uuid:', uuid())" jr:preload="uid"/>
+      <bind nodeset="/data/meta/formVersion" type="string" readonly="true()"
+        calculate="'1'"/>
     </model>
   </h:head>
   <h:body>
