@@ -61,7 +61,20 @@ class ProjectAuditor:
                     version_id = str(version.get("instanceId") or version.get("versionId") or version.get("id") or "")
                     if version_id:
                         tasks.append(("submission_version", form_id, logical_id, version_id, version))
-        return AuditPlan(forms, tuple(tasks), frozenset(self._existing_audit_ids()))
+        existing = self._existing_audit_ids()
+        if hasattr(self.client, "submission"):
+            for task in tasks:
+                record_id = audit_instance_id(self.project_id, task[1], task[2], task[3])
+                if record_id in existing:
+                    continue
+                try:
+                    self.client.submission(audit_form, record_id)
+                except CentralError as error:
+                    if "returned HTTP 404" not in str(error):
+                        raise
+                else:
+                    existing.add(record_id)
+        return AuditPlan(forms, tuple(tasks), frozenset(existing))
 
     def run(self, plan: AuditPlan | None = None) -> RunSummary:
         plan = plan or self.plan()

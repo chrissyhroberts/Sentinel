@@ -92,6 +92,9 @@ class CentralClient:
         path = self._submission_path(form_id, instance_id) + "/versions"
         return _items(self.get_json(path))
 
+    def submission(self, form_id: str, instance_id: str) -> dict[str, Any]:
+        return dict(self.get_json(self._submission_path(form_id, instance_id)))
+
     def version_metadata(self, form_id: str, instance_id: str, version_id: str) -> dict[str, Any]:
         return dict(self.get_json(self._submission_path(form_id, instance_id) + f"/versions/{_quote(version_id)}"))
 
