@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from xml.sax.saxutils import escape
 
-from .central import CentralClient
+from .central import CentralClient, CentralError
 from .project import audit_instance_id, checkpoint_instance_id
 
 
@@ -77,12 +77,19 @@ class ProjectAuditor:
             if getattr(self.client, "debug", False):
                 label = f"{form_id}/{version_id}" if kind == "form_version" else f"{form_id}/{logical_id}/{version_id}"
                 print(f"[debug] archiving {kind}: {label}", file=sys.stderr)
-            if kind == "form_version":
-                self._submit_form_version(form_id, version_id, metadata)
-                form_versions_submitted += 1
-            else:
-                self._submit_version(form_id, logical_id, version_id, metadata)
-                submitted += 1
+            try:
+                if kind == "form_version":
+                    self._submit_form_version(form_id, version_id, metadata)
+                    form_versions_submitted += 1
+                else:
+                    self._submit_version(form_id, logical_id, version_id, metadata)
+                    submitted += 1
+            except CentralError as error:
+                if not _is_existing_record(error):
+                    raise
+                skipped += 1
+                if getattr(self.client, "debug", False):
+                    print("[debug] Central already has this audit record; continuing", file=sys.stderr)
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped)
@@ -213,3 +220,8 @@ def _reason_status(comments: list[dict[str, Any]], version_id: str) -> str:
     if any(c.get("versionId") == version_id or c.get("version_id") == version_id for c in comments):
         return "linked_central_comment"
     return "no_linked_reason_recorded"
+
+
+def _is_existing_record(error: CentralError) -> bool:
+    message = str(error)
+    return "409.3" in message and "already exists" in message
