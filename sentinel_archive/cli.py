@@ -29,3 +29,7 @@ def main() -> None:
         client = CentralClient(central_config)
     summary = ProjectAuditor(client).run()
     print(json.dumps(summary.__dict__, indent=2))
+
+
+if __name__ == "__main__":
+    main()
