@@ -74,7 +74,11 @@ class CentralClient:
             if not instance:
                 raise CentralError("Audit submission XML did not contain an instanceID")
             for filename, data in attachments.items():
-                self.upload_attachment(form_id, instance, filename, data)
+                # Central's attachment endpoint receives opaque binary data.
+                # In particular, application/json can be parsed as an API body
+                # instead of being stored as the JSON attachment bytes.
+                self.upload_attachment(form_id, instance, filename, data,
+                                       content_type="application/octet-stream")
 
     def upload_attachment(self, form_id: str, instance_id: str, filename: str, data: bytes,
                           content_type: str | None = None) -> None:

@@ -55,7 +55,17 @@ def timestamp_manifest(data: bytes, url: str, timeout: int = 60) -> TimestampEvi
         certificate = b""
         try:
             _openssl(["ts", "-reply", "-in", str(response), "-token_out", "-out", str(token_der)])
-            certificate = _openssl_bytes(["pkcs7", "-inform", "DER", "-in", str(token_der), "-print_certs"])
+            certificate_output = _openssl_bytes(
+                ["pkcs7", "-inform", "DER", "-in", str(token_der), "-print_certs"]
+            ).decode("ascii", "ignore")
+            match = re.search(
+                r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----\s*",
+                certificate_output,
+                re.DOTALL,
+            )
+            if not match:
+                raise TimestampError("TSA response did not contain a PEM certificate")
+            certificate = match.group(0).encode("ascii")
         except TimestampError:
             # The RFC3161 token remains the authoritative evidence attachment.
             pass
