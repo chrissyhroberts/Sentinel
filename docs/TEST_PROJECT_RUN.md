@@ -1,6 +1,6 @@
 # Test-project run
 
-Publish `docs/sentinel_project_audit_v2.xlsx` in the selected Central project,
+Publish `docs/project_audit_sentinel_v1.xlsx` in the selected Central project,
 give the Sentinel account read access to source forms and submit access to the
 audit form, then create a local configuration file outside the repository:
 
@@ -10,7 +10,7 @@ audit form, then create a local configuration file outside the repository:
   "project_id": "123",
   "email": "your-central-email@example.org",
   "audit_form_id": "sentinel_project_audit",
-  "audit_form_version": "2",
+  "audit_form_version": "1",
   "token_env": "ODK_CENTRAL_TOKEN"
 }
 ```
