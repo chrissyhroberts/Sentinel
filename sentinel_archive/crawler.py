@@ -492,12 +492,20 @@ def _collect_reason(data: bytes) -> str:
 
 
 def _comment_reason(comments: list[dict[str, Any]]) -> str:
+    """Return one best-effort comment for this edit.
+
+    Central comments are submission-level and have no version identifier.  The
+    endpoint returns them in creation order in current Central releases, so
+    the last non-empty comment is the least-wrong association for the version
+    being processed.  Do not flatten the entire submission conversation into
+    every edit record.
+    """
     values: list[str] = []
     for comment in comments:
         body = str(comment.get("body") or "").strip()
         if body and body not in values:
             values.append(body)
-    return " | ".join(values)
+    return values[-1] if values else ""
 
 
 def _change_summary(diffs: Any, version_id: str) -> str:
@@ -509,7 +517,7 @@ def _change_summary(diffs: Any, version_id: str) -> str:
         if not isinstance(change, dict):
             continue
         path = "/" + "/".join(str(part) for part in change.get("path", []))
-        if path in {"/meta/instanceID", "/meta/deprecatedID"}:
+        if path in {"/meta/instanceID", "/meta/instanceName", "/meta/deprecatedID"}:
             continue
         old = "(blank)" if change.get("old") in (None, "") else str(change.get("old"))
         new = "(blank)" if change.get("new") in (None, "") else str(change.get("new"))
