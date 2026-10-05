@@ -90,6 +90,16 @@ class ProjectAuditor:
             record_id = audit_instance_id(self.project_id, form_id, logical_id, version_id)
             if record_id in completed:
                 skipped += 1
+                run_records.append({
+                    "audit_instance_id": record_id,
+                    "record_type": "source_form_version" if kind == "form_version" else (
+                        "original_submission" if version_id == logical_id else "submission_edit"
+                    ),
+                    "status": "already_present",
+                    "source_form_id": form_id,
+                    "source_instance_id": logical_id,
+                    "source_version_id": version_id,
+                })
                 continue
             if getattr(self.client, "debug", False):
                 label = f"{form_id}/{version_id}" if kind == "form_version" else f"{form_id}/{logical_id}/{version_id}"
