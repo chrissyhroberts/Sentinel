@@ -11,6 +11,23 @@ canonical MethodMesh payloads from XLSForm recipes.
 See [the archival baseline](docs/ARCHIVAL_BASELINE.md) for the governing
 scope, evidence model and archive layout.
 
+## Local configuration
+
+The Central connection configuration is kept outside Git at:
+
+```text
+.sentinel-local/sentinel.config
+```
+
+Run Sentinel from the repository root with:
+
+```sh
+python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --debug
+```
+
+The directory is gitignored. Passwords are entered interactively and are not
+saved by Sentinel.
+
 The audit boundary is always one explicitly configured Central project. See
 the [universal project audit form contract](docs/PROJECT_AUDIT_FORM_CONTRACT.md).
 
