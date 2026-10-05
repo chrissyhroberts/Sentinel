@@ -59,12 +59,16 @@ class FakeSink:
 class CrawlerTests(unittest.TestCase):
     def test_project_scope_and_resume_record(self):
         sink = FakeSink()
-        summary = ProjectAuditor(FakeClient(), sink).run()
+        auditor = ProjectAuditor(FakeClient(), sink)
+        plan = auditor.plan()
+        self.assertEqual(len(plan.tasks), 2)
+        summary = auditor.run(plan)
         self.assertEqual(summary.forms_seen, 1)
         self.assertEqual(summary.versions_submitted, 1)
         self.assertEqual(summary.form_versions_submitted, 1)
         self.assertEqual(len(sink.submissions), 3)
         submission = [item for item in sink.submissions if b"linked_central_comment" in item[1]][0]
+        self.assertIn(b'<data id="sentinel_project_audit" version="1">', submission[1])
         self.assertIn(b"<formVersion>1</formVersion>", submission[1])
         self.assertIn("source_bundle.zip", submission[2])
         bundle = submission[2]["source_bundle.zip"]

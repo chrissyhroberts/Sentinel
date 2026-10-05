@@ -26,6 +26,13 @@ class RunSummary:
     form_versions_submitted: int
 
 
+@dataclass(frozen=True)
+class AuditPlan:
+    forms: tuple[dict[str, Any], ...]
+    tasks: tuple[tuple[str, str, str, str, dict[str, Any]], ...]
+    existing_audit_ids: frozenset[str]
+
+
 class ProjectAuditor:
     """Audit every source form in one configured Central project."""
 
@@ -34,39 +41,46 @@ class ProjectAuditor:
         self.sink = sink or client
         self.project_id = client.config.project_id
 
-    def run(self) -> RunSummary:
-        completed = self._existing_audit_ids()
-        forms = [form for form in self.client.forms() if form.get("xmlFormId") != self.client.config.audit_form_id]
-        seen = submitted = skipped = form_versions_submitted = 0
+    def plan(self) -> AuditPlan:
+        all_forms = self.client.forms()
+        audit_form = self.client.config.audit_form_id
+        if not any((form.get("xmlFormId") or form.get("formId")) == audit_form for form in all_forms):
+            raise RuntimeError(f"Audit form {audit_form!r} was not found in project {self.project_id}")
+        forms = tuple(form for form in all_forms if (form.get("xmlFormId") or form.get("formId")) != audit_form)
+        tasks: list[tuple[str, str, str, str, dict[str, Any]]] = []
         for form in forms:
             form_id = str(form.get("xmlFormId") or form.get("formId"))
-            if not form_id:
-                continue
-            seen += 1
             for form_version in self.client.form_versions(form_id):
-                form_version_id = str(form_version.get("version") or form_version.get("id") or "")
-                if not form_version_id:
-                    continue
-                record_id = audit_instance_id(self.project_id, form_id, "form-definition", form_version_id)
-                if record_id in completed:
-                    skipped += 1
-                    continue
-                self._submit_form_version(form_id, form_version_id, form_version)
-                form_versions_submitted += 1
+                version_id = str(form_version.get("version") or form_version.get("id") or "")
+                if version_id:
+                    tasks.append(("form_version", form_id, "form-definition", version_id, form_version))
             for submission in self.client.submissions(form_id):
-                logical_id = str(submission.get("instanceId") or submission.get("id"))
+                logical_id = str(submission.get("instanceId") or submission.get("id") or "")
                 if not logical_id:
                     continue
                 for version in self.client.versions(form_id, logical_id):
-                    version_id = str(version.get("instanceId") or version.get("versionId") or version.get("id"))
-                    if not version_id:
-                        continue
-                    record_id = audit_instance_id(self.project_id, form_id, logical_id, version_id)
-                    if record_id in completed:
-                        skipped += 1
-                        continue
-                    self._submit_version(form_id, logical_id, version_id, version)
-                    submitted += 1
+                    version_id = str(version.get("instanceId") or version.get("versionId") or version.get("id") or "")
+                    if version_id:
+                        tasks.append(("submission_version", form_id, logical_id, version_id, version))
+        return AuditPlan(forms, tuple(tasks), frozenset(self._existing_audit_ids()))
+
+    def run(self, plan: AuditPlan | None = None) -> RunSummary:
+        plan = plan or self.plan()
+        completed = set(plan.existing_audit_ids)
+        forms = plan.forms
+        seen = submitted = skipped = form_versions_submitted = 0
+        seen = len(forms)
+        for kind, form_id, logical_id, version_id, metadata in plan.tasks:
+            record_id = audit_instance_id(self.project_id, form_id, logical_id, version_id)
+            if record_id in completed:
+                skipped += 1
+                continue
+            if kind == "form_version":
+                self._submit_form_version(form_id, version_id, metadata)
+                form_versions_submitted += 1
+            else:
+                self._submit_version(form_id, logical_id, version_id, metadata)
+                submitted += 1
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped)
@@ -188,7 +202,7 @@ def _bundle(source: bytes, attachments: dict[str, bytes], audits: list[dict[str,
 def _audit_xml(instance_id: str, fields: dict[str, str], bundle_name: str) -> bytes:
     values = "".join(f"<{key}>{escape(str(value or ''))}</{key}>" for key, value in fields.items())
     values += f"<source_bundle>{escape(bundle_name)}</source_bundle>"
-    return (f'<?xml version="1.0" encoding="UTF-8"?><data id="sentinel_project_audit">'
+    return (f'<?xml version="1.0" encoding="UTF-8"?><data id="sentinel_project_audit" version="1">'
             f"{values}<meta><instanceID>{escape(instance_id)}</instanceID><formVersion>1</formVersion></meta></data>").encode()
 
 
