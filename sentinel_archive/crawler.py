@@ -133,7 +133,8 @@ class ProjectAuditor:
             "checkpoint_cursor": version_id,
         }
         form_version = getattr(self.client.config, "audit_form_version", "1")
-        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, fields, form_version), {})
+        self.sink.submit(self.client.config.audit_form_id, _audit_xml(
+            audit_id, fields, form_version, self.client.config.audit_form_id), {})
 
     def _existing_audit_ids(self) -> set[str]:
         result: set[str] = set()
@@ -170,7 +171,8 @@ class ProjectAuditor:
             "checkpoint_cursor": version_id,
         }
         form_version = getattr(self.client.config, "audit_form_version", "1")
-        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, metadata, form_version), {})
+        self.sink.submit(self.client.config.audit_form_id, _audit_xml(
+            audit_id, metadata, form_version, self.client.config.audit_form_id), {})
 
     def _submit_checkpoint(self, *, forms_seen: int, versions_seen: int) -> None:
         audit_id = checkpoint_instance_id(self.project_id)
@@ -195,12 +197,15 @@ class ProjectAuditor:
             "sentinel_run_id": "",
             "checkpoint_cursor": str(versions_seen),
         }
-        self.sink.submit(self.client.config.audit_form_id, _audit_xml(audit_id, metadata, ""), {})
+        self.sink.submit(self.client.config.audit_form_id, _audit_xml(
+            audit_id, metadata, getattr(self.client.config, "audit_form_version", "1"),
+            self.client.config.audit_form_id), {})
 
 
-def _audit_xml(instance_id: str, fields: dict[str, str], form_version: str) -> bytes:
+def _audit_xml(instance_id: str, fields: dict[str, str], form_version: str,
+               form_id: str = "sentinel_project_audit") -> bytes:
     values = "".join(f"<{key}>{escape(_xml_safe(value))}</{key}>" for key, value in fields.items())
-    return (f'<?xml version="1.0" encoding="UTF-8"?><data id="sentinel_project_audit" version="{escape(form_version)}" '
+    return (f'<?xml version="1.0" encoding="UTF-8"?><data id="{escape(form_id)}" version="{escape(form_version)}" '
             'xmlns:orx="http://openrosa.org/xforms">'
             f"{values}<orx:meta><orx:instanceID>{escape(_xml_safe(instance_id))}</orx:instanceID></orx:meta></data>").encode()
 
