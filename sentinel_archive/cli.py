@@ -16,6 +16,8 @@ def main() -> None:
     parser.add_argument("config", type=Path, help="JSON config containing base_url, project_id and audit_form_id")
     parser.add_argument("--plan-only", action="store_true", help="discover and print pending work without submitting anything")
     parser.add_argument("--debug", action="store_true", help="print progress and retry diagnostics to the terminal")
+    parser.add_argument("--download-xml", nargs=3, metavar=("FORM_ID", "INSTANCE_ID", "OUTPUT"),
+                        help="download one Central submission XML for diagnostics")
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding="utf-8"))
     central_config = CentralConfig(
@@ -32,6 +34,11 @@ def main() -> None:
     else:
         client = CentralClient(central_config, debug=args.debug)
     auditor = ProjectAuditor(client)
+    if args.download_xml:
+        form_id, instance_id, output = args.download_xml
+        Path(output).write_bytes(client.submission_xml(form_id, instance_id))
+        print(output)
+        return
     plan = auditor.plan()
     pending = [task for task in plan.tasks if audit_instance_id(
         client.config.project_id, task[1], task[2], task[3]) not in plan.existing_audit_ids]
