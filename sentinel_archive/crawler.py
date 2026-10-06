@@ -5,6 +5,7 @@ import json
 import csv
 import io
 import sys
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -152,7 +153,7 @@ class ProjectAuditor:
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped, run_id=run_id)
-        self._submit_run_manifest(run_id, run_records)
+        self._submit_run_manifest(run_id, run_records, self._previous_manifest_reference())
         return RunSummary(self.project_id, seen, submitted + skipped, submitted, skipped, form_versions_submitted)
 
     def _central_event_tasks(self, forms: tuple[dict[str, Any], ...], source_tasks: list[tuple]) -> list[tuple]:
@@ -398,12 +399,68 @@ class ProjectAuditor:
             audit_id, metadata, getattr(self.client.config, "audit_form_version", "1"),
             self.client.config.audit_form_id), {})
 
-    def _submit_run_manifest(self, run_id: str, records: list[dict[str, Any]]) -> None:
+    def _previous_manifest_reference(self) -> dict[str, str]:
+        """Find and verify the latest retained run manifest in Central."""
+        candidates: list[tuple[datetime, dict[str, str]]] = []
+        try:
+            submissions = self.client.submissions(self.client.config.audit_form_id)
+        except CentralError:
+            return {"status": "previous_manifest_unavailable"}
+        for submission in submissions:
+            instance_id = str(submission.get("instanceId") or submission.get("id") or "")
+            if not instance_id:
+                continue
+            try:
+                xml = self.client.version_xml(self.client.config.audit_form_id, instance_id, instance_id)
+                root = ET.fromstring(xml)
+            except (CentralError, ET.ParseError):
+                continue
+            values = {
+                element.tag.rsplit("}", 1)[-1]: str(element.text or "")
+                for element in root
+            }
+            if values.get("record_type") != "run_timestamp_manifest":
+                continue
+            manifest_hash = values.get("timestamp_batch_sha256", "")
+            if not manifest_hash:
+                continue
+            timestamp = _parse_time(submission.get("createdAt") or values.get("central_created_at"))
+            if timestamp is None:
+                timestamp = datetime.min.replace(tzinfo=timezone.utc)
+            status = "previous_manifest_verified"
+            attachments = self.client.version_attachments(
+                self.client.config.audit_form_id, instance_id, instance_id
+            )
+            manifest_name = next((str(item.get("name")) for item in attachments
+                                  if item.get("exists") and str(item.get("name", "")).endswith("timestamp_manifest.json")), None)
+            if manifest_name:
+                try:
+                    attached_hash = _sha(self.client.attachment_bytes(
+                        self.client.config.audit_form_id, instance_id, instance_id, manifest_name
+                    ))
+                    if attached_hash != manifest_hash:
+                        status = "previous_manifest_hash_mismatch"
+                except CentralError:
+                    status = "previous_manifest_attachment_unavailable"
+            else:
+                status = "previous_manifest_attachment_missing"
+            candidates.append((timestamp, {
+                "status": status,
+                "audit_instance_id": instance_id,
+                "manifest_sha256": manifest_hash,
+            }))
+        if not candidates:
+            return {"status": "genesis"}
+        return max(candidates, key=lambda item: item[0])[1]
+
+    def _submit_run_manifest(self, run_id: str, records: list[dict[str, Any]],
+                             previous: dict[str, str]) -> None:
         manifest = {
             "schema": "methodmesh.sentinel.run_timestamp_manifest.v1",
             "project_id": self.project_id,
             "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "chain": previous,
             "record_types": {
                 "source_form_version": "A deployed source-form definition version",
                 "original_submission": "The original Central submission version",
@@ -428,7 +485,7 @@ class ProjectAuditor:
             "collect_audit_sha256": "",
             "central_created_at": manifest["created_at"],
             "central_actor_id": "",
-            "change_reason": "Sentinel run manifest",
+            "change_reason": f"Sentinel run manifest; chain={previous.get('status', 'unknown')}"[:64],
             "reason_link_status": "sentinel_run_manifest",
             "timestamp_status": evidence.status,
             "timestamp_time": evidence.time,

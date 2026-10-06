@@ -67,9 +67,12 @@ The exact source bytes are hashed in memory. The audit form stores hashes,
 identifiers and references, not a second copy of participant data. Each run
 creates a manifest; when RFC3161 is available, the manifest hash is submitted
 to the configured TSA and the manifest, token and certificate are attached to
-the audit record. If the TSA is unavailable, the manifest is retained with an
-explicit non-timestamped status. Sentinel does not backdate timestamps or use
-`previous_attestation_hash` as a chain of trust.
+the audit record. Each manifest also carries the previous manifest's audit
+record ID and hash, creating a timestamped run-level chain. Sentinel verifies
+the previous manifest attachment when it can and reports a missing or changed
+link. If the TSA is unavailable, the manifest is retained with an explicit
+non-timestamped status. Sentinel does not use a per-source-record
+`previous_attestation_hash` chain.
 
 Completed records are not rewritten. A subsequent run skips an existing
 deterministic record and only submits new source versions or new enabled audit

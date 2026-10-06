@@ -50,6 +50,11 @@ call is unavailable, the manifest is still preserved and its status is
 explicitly `manifest_created_not_timestamped`; a required policy fails the run
 instead.
 
+Manifests carry the previous manifest's audit-record ID and hash. This creates
+a run-level, timestamp-anchored chain that can expose an altered or missing
+intermediate manifest. It is deliberately not a `previous_attestation_hash`
+chain on every source record.
+
 The same form also stores one deterministic project checkpoint record. A new
 run reads that checkpoint and the existing audit-form submissions before
 fetching work, so completed versions are not repeated.
