@@ -9,6 +9,7 @@ from pathlib import Path
 from .central import CentralClient, CentralConfig
 from .crawler import ProjectAuditor
 from .project import audit_instance_id
+from .validation import validate_plan, validation_error
 
 
 def main() -> None:
@@ -16,6 +17,7 @@ def main() -> None:
     parser.add_argument("config", type=Path, help="JSON config containing base_url, project_id and audit_form_id")
     parser.add_argument("--plan-only", action="store_true", help="discover and print pending work without submitting anything")
     parser.add_argument("--debug", action="store_true", help="print progress and retry diagnostics to the terminal")
+    parser.add_argument("--validate", action="store_true", help="run read-only automated validation checks")
     parser.add_argument("--download-xml", nargs=3, metavar=("FORM_ID", "INSTANCE_ID", "OUTPUT"),
                         help="download one Central submission XML for diagnostics")
     args = parser.parse_args()
@@ -43,7 +45,16 @@ def main() -> None:
         Path(output).write_bytes(client.submission_xml(form_id, instance_id))
         print(output)
         return
-    plan = auditor.plan()
+    try:
+        plan = auditor.plan()
+    except Exception as error:
+        if args.validate:
+            print(json.dumps(validation_error(central_config.project_id, error), indent=2))
+            return
+        raise
+    if args.validate:
+        print(json.dumps(validate_plan(client, plan), indent=2))
+        return
     pending = [task for task in plan.tasks if audit_instance_id(
         client.config.project_id, task[1], task[2], task[3]) not in plan.existing_audit_ids]
     print(json.dumps({

@@ -2,6 +2,7 @@ import json
 import unittest
 
 from sentinel_archive.crawler import ProjectAuditor
+from sentinel_archive.validation import validate_plan
 
 
 class FakeConfig:
@@ -67,6 +68,15 @@ class FakeSink:
 
 
 class CrawlerTests(unittest.TestCase):
+    def test_read_only_validation_separates_central_and_sentinel_checks(self):
+        client = FakeClient()
+        plan = ProjectAuditor(client).plan()
+        report = validate_plan(client, plan)
+        self.assertEqual(report["status"], "passed")
+        self.assertIn("ODK Central", report["components"])
+        self.assertIn("Sentinel", report["components"])
+        self.assertTrue(all(check["status"] == "pass" for check in report["checks"]))
+
     def test_project_scope_and_resume_record(self):
         sink = FakeSink()
         auditor = ProjectAuditor(FakeClient(), sink)
