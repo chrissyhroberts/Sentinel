@@ -10,6 +10,9 @@ not reconstruct canonical MethodMesh payloads from XLSForm recipes.
 See [the archival baseline](docs/ARCHIVAL_BASELINE.md) for the governing
 scope, evidence model and archive layout.
 
+For independent verification or a complete retained XML export, see
+[Verify and export source XML](docs/VERIFY_AND_EXPORT_SOURCE_XML.md).
+
 ## Local configuration
 
 The Central connection configuration is kept outside Git at:
