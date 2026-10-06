@@ -12,6 +12,85 @@ This is a working sponsor checklist, not a claim that Sentinel is validated.
 Each completed item should point to an approved document, test record, Central
 configuration snapshot, or other retained evidence.
 
+## A priori draft baseline
+
+The following can be entered before trial-specific testing. They describe the
+current Sentinel architecture and proposed intended use; they still require
+review and approval by the sponsor/system owner.
+
+### Proposed intended use
+
+- **Purpose:** project-level integrity ledger and reconstruction aid for ODK
+  Central trial records.
+- **Source system:** ODK Central retains the original source submissions and
+  their retained versions. Sentinel does not replace Central or copy the
+  source dataset into a second form.
+- **Sentinel evidence:** exact Central submission bytes are hashed; Central
+  version metadata, actor identity, server time, diffs, applicable Collect audit
+  data and timestamp-manifest evidence are recorded.
+- **Identity:** MethodMesh NFC credentials identify the operator where the
+  relevant form/process uses them. This is not automatically an electronic
+  signature or investigator approval.
+- **Time:** Central server timestamps and RFC3161 evidence are used where
+  available. Offline/local time is labelled as non-trusted time evidence and
+  is not backdated.
+- **Scope:** one explicitly configured Central project per run; the server-wide
+  Central audit feed is disabled by default.
+- **Storage boundary:** no password, token, participant dataset or unapproved
+  local research archive is retained by Sentinel.
+- **Out of scope:** canonical XLSForm recipe reconstruction,
+  `previous_attestation_hash` per-record chaining, prevention of Central
+  administrator actions, and ordinary web logout evidence where Central does
+  not emit it.
+
+Sponsor/system-owner decision:
+
+```text
+[ ] Proposed baseline accepted as intended use
+[ ] Amendments required
+Owner:
+Date:
+Approval/evidence reference:
+```
+
+### Proposed system boundary
+
+```text
+Operator/NFC credential
+        -> ODK Collect and Collect audit.csv where enabled
+        -> ODK Central source form and retained versions
+        -> Sentinel read/hash/diff/reason process
+        -> Central project audit form
+        -> RFC3161 TSA when enabled/available
+        -> TMF/inspection evidence through Central
+```
+
+Confirm before release:
+
+- [ ] Project and source-form allowlist approved.
+- [ ] Audit form ID and published version approved.
+- [ ] Central remains the authoritative source-data repository.
+- [ ] Sentinel account is restricted to required read/submit permissions.
+- [ ] Timestamp policy is approved as `preferred` or `required`.
+- [ ] `server_audit_enabled` is approved as `false` for the proportionate
+  baseline, unless a separate forensic requirement exists.
+
+### Evidence already available from the current implementation
+
+- [x] Deterministic IDs and resume/duplicate behavior are covered by automated
+  tests.
+- [x] Exact source XML and audit metadata hashing are implemented.
+- [x] Central actor-to-email mapping is implemented where permitted.
+- [x] Central edit diffs and Collect change reasons are implemented.
+- [x] RFC3161 manifest, token and certificate handling is implemented.
+- [x] Run-level manifest chaining and prior-manifest verification are
+  implemented.
+- [x] Preferred timestamp failure and interrupted-run behavior are defined.
+
+These checkmarks mean implemented or tested in the repository, not validated
+for a regulated trial. The sponsor must still link each item to controlled
+test evidence and approve its use.
+
 ## 1. Intended use and scope
 
 - [ ] Define the trial, project and Central installation in scope.
