@@ -428,12 +428,16 @@ class ProjectAuditor:
             if timestamp is None:
                 timestamp = datetime.min.replace(tzinfo=timezone.utc)
             status = "previous_manifest_verified"
-            attachments = self.client.version_attachments(
-                self.client.config.audit_form_id, instance_id, instance_id
-            )
+            try:
+                attachments = self.client.version_attachments(
+                    self.client.config.audit_form_id, instance_id, instance_id
+                )
+            except CentralError:
+                attachments = []
+                status = "previous_manifest_attachment_unavailable"
             manifest_name = next((str(item.get("name")) for item in attachments
                                   if item.get("exists") and str(item.get("name", "")).endswith("timestamp_manifest.json")), None)
-            if manifest_name:
+            if manifest_name and status == "previous_manifest_verified":
                 try:
                     attached_hash = _sha(self.client.attachment_bytes(
                         self.client.config.audit_form_id, instance_id, instance_id, manifest_name
