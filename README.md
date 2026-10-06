@@ -11,7 +11,7 @@ See [the archival baseline](docs/ARCHIVAL_BASELINE.md) for the governing
 scope, evidence model and archive layout.
 
 For independent verification or a complete retained XML export, see
-[Verify and export source XML](docs/VERIFY_AND_EXPORT_SOURCE_XML.md).
+[Verify and export source XML](docs/operational/VERIFY_AND_EXPORT_SOURCE_XML.md).
 
 ## Local configuration
 
@@ -31,7 +31,11 @@ The directory is gitignored. Passwords are entered interactively and are not
 saved by Sentinel.
 
 The audit boundary is always one explicitly configured Central project. See
-the [universal project audit form contract](docs/PROJECT_AUDIT_FORM_CONTRACT.md).
+the [universal project audit form contract](docs/operational/PROJECT_AUDIT_FORM_CONTRACT.md).
+
+Operational procedures are in [docs/operational](docs/operational/). The
+risk-based validation checklist and workflow are in
+[docs/validation](docs/validation/).
 
 The current test form is `audit_001`, version 2. The form ID and version are
 configuration values, so the same code can be used with a universal audit form
@@ -51,6 +55,8 @@ For the configured project, one run records:
 - field-level edit diffs, actors and server timestamps;
 - Collect audit trails and version-linked change reasons where available;
 - a deterministic project checkpoint and timestamped run manifest.
+- an automated validation certificate containing the run's reconciliation,
+  identity, chain and timestamp checks.
 
 The server-wide Central audit feed is deliberately opt-in. Set
 `server_audit_enabled` to `true` only when forensic lifecycle events such as
@@ -80,6 +86,11 @@ non-timestamped status. Sentinel does not use a per-source-record
 Completed records are not rewritten. A subsequent run skips an existing
 deterministic record and only submits new source versions or new enabled audit
 events.
+
+Each run also submits a `validation_certificate` record. Its JSON attachment
+contains the automated check results and is independently timestamped using
+the same preferred/required policy. A certificate with warnings is still
+preserved for review; a required timestamp failure stops the run.
 
 ## Failure and recovery behavior
 

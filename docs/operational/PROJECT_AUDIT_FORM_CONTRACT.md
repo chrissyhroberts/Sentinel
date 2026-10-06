@@ -40,6 +40,7 @@ submission UUID; Sentinel does not copy it into the audit form.
 | `central_*` | Optional project-filtered Central server-audit event; disabled by default |
 | `project_checkpoint` | The crawl checkpoint for the configured project |
 | `run_timestamp_manifest` | The manifest covering one Sentinel run |
+| `validation_certificate` | Automated validation and reconciliation results for one Sentinel run |
 
 Each run also creates a `run_timestamp_manifest` record. Its
 `timestamp_batch_sha256` is the SHA-256 of the attached `timestamp_manifest.json`,
@@ -54,6 +55,12 @@ Manifests carry the previous manifest's audit-record ID and hash. This creates
 a run-level, timestamp-anchored chain that can expose an altered or missing
 intermediate manifest. It is deliberately not a `previous_attestation_hash`
 chain on every source record.
+
+Every run also creates a `validation_certificate` record. Its
+`validation_certificate.json` attachment contains the checks performed during
+the run, including deterministic-ID uniqueness, planned-versus-processed
+reconciliation, manifest-chain status and timestamp status. The certificate
+has its own hash and timestamp evidence.
 
 The same form also stores one deterministic project checkpoint record. A new
 run reads that checkpoint and the existing audit-form submissions before

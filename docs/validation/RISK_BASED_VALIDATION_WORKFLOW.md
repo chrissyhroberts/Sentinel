@@ -90,9 +90,11 @@ For each production run:
 2. Run Sentinel with the controlled release.
 3. Review the summary and any warnings.
 4. Confirm the timestamp status and manifest chain status.
-5. Investigate pending, missing, duplicate or changed records.
-6. Preserve the manifest, timestamp token and certificate in Central.
-7. Record the run review and exceptions in the quality system.
+5. Open the `validation_certificate` record and review its automated checks.
+6. Investigate pending, missing, duplicate or changed records.
+7. Preserve the manifest, validation certificate, timestamp token and TSA
+   certificate in Central.
+8. Record the run review and exceptions in the quality system.
 
 Sentinel's idempotent deterministic IDs allow a stopped run to be repeated.
 An RFC3161 outage under preferred policy is an exception to review, not an

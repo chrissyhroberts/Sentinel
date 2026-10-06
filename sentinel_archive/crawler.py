@@ -153,7 +153,9 @@ class ProjectAuditor:
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped, run_id=run_id)
-        self._submit_run_manifest(run_id, run_records, self._previous_manifest_reference())
+        previous = self._previous_manifest_reference()
+        manifest_fields = self._submit_run_manifest(run_id, run_records, previous)
+        self._submit_validation_certificate(run_id, plan, run_records, previous, manifest_fields)
         return RunSummary(self.project_id, seen, submitted + skipped, submitted, skipped, form_versions_submitted)
 
     def _central_event_tasks(self, forms: tuple[dict[str, Any], ...], source_tasks: list[tuple]) -> list[tuple]:
@@ -458,7 +460,7 @@ class ProjectAuditor:
         return max(candidates, key=lambda item: item[0])[1]
 
     def _submit_run_manifest(self, run_id: str, records: list[dict[str, Any]],
-                             previous: dict[str, str]) -> None:
+                             previous: dict[str, str]) -> dict[str, str]:
         manifest = {
             "schema": "methodmesh.sentinel.run_timestamp_manifest.v1",
             "project_id": self.project_id,
@@ -471,6 +473,7 @@ class ProjectAuditor:
                 "submission_edit": "A later Central-retained edit of a submission",
                 "project_checkpoint": "The project crawl checkpoint",
                 "run_timestamp_manifest": "The manifest for this Sentinel run",
+                "validation_certificate": "Automated checks for this Sentinel run",
             },
             "records": records,
         }
@@ -507,6 +510,87 @@ class ProjectAuditor:
             _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
                        self.client.config.audit_form_id),
             self._timestamp_attachments(manifest_bytes, evidence),
+        )
+        return fields
+
+    def _submit_validation_certificate(self, run_id: str, plan: AuditPlan,
+                                       records: list[dict[str, Any]],
+                                       previous: dict[str, str],
+                                       manifest_fields: dict[str, str]) -> None:
+        ids = [record.get("audit_instance_id", "") for record in records]
+        checks = [
+            _validation_check("audit_form_configured", bool(self.client.config.audit_form_id), "Audit form configured"),
+            _validation_check("source_scope_discovered", bool(plan.forms), "Configured source-form scope discovered"),
+            _validation_check("deterministic_ids_unique", len(ids) == len(set(ids)), "No duplicate audit IDs in run"),
+            _validation_check("run_reconciled", len(records) == len(plan.tasks), "Every planned task has a run result"),
+            _validation_check(
+                "manifest_chain", previous.get("status") in {"genesis", "previous_manifest_verified"},
+                f"Previous manifest status: {previous.get('status', 'unknown')}",
+                warning=True,
+            ),
+            _validation_check(
+                "run_manifest_timestamp", manifest_fields.get("timestamp_status") == "rfc3161_verified",
+                f"Run manifest timestamp: {manifest_fields.get('timestamp_status', 'unknown')}",
+                warning=True,
+            ),
+        ]
+        failures = [check for check in checks if check["status"] == "fail"]
+        warnings = [check for check in checks if check["status"] == "warning"]
+        status = "failed" if failures else ("passed_with_warnings" if warnings else "passed")
+        certificate = {
+            "schema": "methodmesh.sentinel.validation_certificate.v1",
+            "project_id": self.project_id,
+            "validation_run_id": run_id,
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "status": status,
+            "checks": checks,
+            "summary": {
+                "forms": len(plan.forms),
+                "planned_records": len(plan.tasks),
+                "run_records": len(records),
+                "submitted": sum(record.get("status") == "submitted" for record in records),
+                "already_present": sum(record.get("status") == "already_present" for record in records),
+            },
+            "run_manifest": {
+                "audit_instance_id": manifest_fields.get("source_audit_instance_id", ""),
+                "sha256": manifest_fields.get("timestamp_batch_sha256", ""),
+                "timestamp_status": manifest_fields.get("timestamp_status", ""),
+            },
+        }
+        certificate_bytes = (json.dumps(certificate, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
+        evidence = self._timestamp_manifest(certificate_bytes)
+        audit_id = audit_instance_id(self.project_id, "validation-certificate", run_id, run_id)
+        fields = {
+            "record_type": "validation_certificate",
+            "project_id": self.project_id,
+            "source_form_id": "",
+            "source_instance_id": "",
+            "source_version_id": run_id,
+            "source_audit_instance_id": audit_id,
+            "source_content_sha256": _sha(certificate_bytes),
+            "collect_audit_sha256": "",
+            "central_created_at": certificate["created_at"],
+            "central_actor_id": "",
+            "change_reason": f"Validation certificate; status={status}"[:64],
+            "reason_link_status": "sentinel_validation",
+            "timestamp_status": evidence.status,
+            "timestamp_time": evidence.time,
+            "timestamp_batch_id": run_id,
+            "timestamp_batch_sha256": _sha(certificate_bytes),
+            "timestamp_manifest": "validation_certificate.json",
+            "timestamp_token": "timestamp_token.tsr" if evidence.token else "",
+            "timestamp_token_sha256": _sha(evidence.token) if evidence.token else "",
+            "timestamp_certificate": "timestamp_certificate.pem" if evidence.certificate else "",
+            "sentinel_run_id": run_id,
+            "checkpoint_cursor": str(len(records)),
+        }
+        self.sink.submit(
+            self.client.config.audit_form_id,
+            _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
+                       self.client.config.audit_form_id),
+            {"validation_certificate.json": certificate_bytes,
+             **({"timestamp_token.tsr": evidence.token} if evidence.token else {}),
+             **({"timestamp_certificate.pem": evidence.certificate} if evidence.certificate else {})},
         )
 
     def _timestamp_manifest(self, manifest: bytes) -> TimestampEvidence:
@@ -614,6 +698,16 @@ def _central_event_summary(action: str, details: dict[str, Any]) -> str:
         if details.get(key):
             return f"{action}: {str(details[key])[:48]}"[:64]
     return action[:64]
+
+
+def _validation_check(name: str, passed: bool, detail: str, *, warning: bool = False) -> dict[str, str]:
+    if passed:
+        status = "pass"
+    elif warning:
+        status = "warning"
+    else:
+        status = "fail"
+    return {"name": name, "status": status, "detail": detail}
 
 
 def _run_id() -> str:

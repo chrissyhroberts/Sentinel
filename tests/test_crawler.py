@@ -73,7 +73,7 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(summary.forms_seen, 1)
         self.assertEqual(summary.versions_submitted, 1)
         self.assertEqual(summary.form_versions_submitted, 1)
-        self.assertEqual(len(sink.submissions), 4)
+        self.assertEqual(len(sink.submissions), 5)
         submission = [item for item in sink.submissions if b"linked_collect_audit" in item[1]][0]
         self.assertIn(b"<record_type>submission_edit</record_type>", submission[1])
         self.assertIn(b"<central_actor_id>user@example.org</central_actor_id>", submission[1])
@@ -87,6 +87,9 @@ class CrawlerTests(unittest.TestCase):
         self.assertIn(b'<data id="sentinel_project_audit" version="1"', submission[1])
         self.assertIn(b"<orx:meta><orx:instanceID>", submission[1])
         self.assertEqual(submission[2], {})
+        certificate = [item for item in sink.submissions if b"<record_type>validation_certificate</record_type>" in item[1]][0]
+        self.assertEqual(set(certificate[2]), {"validation_certificate.json"})
+        self.assertIn(b'"status": "passed_with_warnings"', certificate[2]["validation_certificate.json"])
 
 
 if __name__ == "__main__":
