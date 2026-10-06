@@ -29,6 +29,7 @@ def main() -> None:
         timestamp_policy=config.get("timestamp_policy", "preferred"),
         timestamp_url=config.get("timestamp_url", "https://tsr.open-tsa.eu"),
         server_audit_start=config.get("server_audit_start", ""),
+        server_audit_enabled=bool(config.get("server_audit_enabled", False)),
     )
     email = config.get("email")
     if email and not os.environ.get(central_config.token_env):

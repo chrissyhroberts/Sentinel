@@ -27,6 +27,7 @@ class CentralConfig:
     timestamp_policy: str = "preferred"
     timestamp_url: str = "https://tsr.open-tsa.eu"
     server_audit_start: str = ""
+    server_audit_enabled: bool = False
 
 
 class CentralClient:

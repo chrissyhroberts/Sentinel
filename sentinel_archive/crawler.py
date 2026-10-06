@@ -156,6 +156,8 @@ class ProjectAuditor:
         return RunSummary(self.project_id, seen, submitted + skipped, submitted, skipped, form_versions_submitted)
 
     def _central_event_tasks(self, forms: tuple[dict[str, Any], ...], source_tasks: list[tuple]) -> list[tuple]:
+        if not getattr(self.client.config, "server_audit_enabled", False):
+            return []
         getter = getattr(self.client, "server_audits", None)
         if getter is None:
             return []

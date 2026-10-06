@@ -5,13 +5,13 @@ same Sentinel code and the same audit form can be used on any Central install;
 only Central connection settings, the project allowlist, and the published
 audit-form identifier are configuration.
 
-The current universal form is [project_audit_sentinel_v1.xlsx](project_audit_sentinel_v1.xlsx).
+The current universal form is [audit_001_v2.xlsx](audit_001_v2.xlsx).
 Publish it once in each audited project. Sentinel needs read permission on the
 project's source forms and submit permission on this audit form. It never edits
 or deletes source submissions.
 
-When version 1 is published, set `audit_form_version` to `1` in the local
-Sentinel configuration. Version 1 contains the ledger fields and batch
+When version 2 is published, set `audit_form_id` and `audit_form_version` in
+the local Sentinel configuration. Version 2 contains the ledger fields and batch
 timestamp fields, including the RFC3161 token upload. It does not contain a
 source-data bundle field.
 
@@ -37,6 +37,7 @@ submission UUID; Sentinel does not copy it into the audit form.
 | `source_form_version` | A published version of a source form |
 | `original_submission` | The original retained Central submission version |
 | `submission_edit` | A later retained Central edit of that submission |
+| `central_*` | Optional project-filtered Central server-audit event; disabled by default |
 | `project_checkpoint` | The crawl checkpoint for the configured project |
 | `run_timestamp_manifest` | The manifest covering one Sentinel run |
 
@@ -55,3 +56,8 @@ fetching work, so completed versions are not repeated.
 
 No project-specific field names, participant fields, XLSForm recipes, or
 MethodMesh attestation payloads are required.
+
+The server-wide Central audit feed is not required for the basic workflow. If
+enabled with `server_audit_enabled`, it requires a Server Administrator account
+and is intended for additional forensic oversight, not routine source-data
+integrity. Central does not generally emit ordinary web logout events.
