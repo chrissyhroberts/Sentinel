@@ -78,6 +78,19 @@ Completed records are not rewritten. A subsequent run skips an existing
 deterministic record and only submits new source versions or new enabled audit
 events.
 
+## Failure and recovery behavior
+
+Sentinel is designed to degrade safely. With the default preferred timestamp
+policy, an unavailable RFC3161 service preserves the manifest and marks it
+explicitly as not timestamped; it does not discard the source audit. A missing
+or changed previous manifest is recorded as a chain warning while source
+archiving may continue. If a run stops part-way through, rerunning it skips
+deterministic records already accepted by Central and resumes the remainder.
+
+Central outages or insufficient permissions can stop a run, but Sentinel does
+not edit or delete source data. Set `timestamp_policy` to `required` only when
+the run must fail unless a trusted timestamp is obtained.
+
 The prior Sentinel pilot and MethodMesh recipe/reconstruction work has been
 preserved in Git stash `pre-archival-sentinel-baseline-2026-10-05` and is not
 part of this current baseline.
