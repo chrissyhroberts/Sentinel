@@ -150,6 +150,16 @@ class ProjectAuditor:
                 })
                 if getattr(self.client, "debug", False):
                     print("[debug] Central already has this audit record; continuing", file=sys.stderr)
+        snapshot_fields = self._submit_platform_snapshot(plan, run_id)
+        run_records.append({
+            "audit_instance_id": snapshot_fields["source_audit_instance_id"],
+            "record_type": snapshot_fields["record_type"],
+            "status": "submitted",
+            "source_form_id": "",
+            "source_instance_id": "",
+            "source_version_id": run_id,
+            "source_content_sha256": snapshot_fields["source_content_sha256"],
+        })
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped, run_id=run_id)
@@ -196,6 +206,84 @@ class ProjectAuditor:
             }
             tasks.append(("central_event", "central-event", event_key, event_key, metadata))
         return tasks
+
+    def _submit_platform_snapshot(self, plan: AuditPlan, run_id: str) -> dict[str, str]:
+        project_status = "available"
+        project_metadata: dict[str, Any] = {}
+        try:
+            project_metadata = self.client.project()
+        except (AttributeError, CentralError) as error:
+            project_status = f"unavailable: {type(error).__name__}"
+        forms: list[dict[str, Any]] = []
+        retained_versions_by_form: dict[str, int] = {}
+        for kind, form_id, _logical_id, _version_id, _metadata in plan.tasks:
+            if kind == "submission_version":
+                retained_versions_by_form[form_id] = retained_versions_by_form.get(form_id, 0) + 1
+        for form in plan.forms:
+            form_id = str(form.get("xmlFormId") or form.get("formId") or "")
+            versions = self.client.form_versions(form_id)
+            submissions = self.client.submissions(form_id)
+            dates = [str(item.get("createdAt") or item.get("created_at")) for item in submissions
+                     if item.get("createdAt") or item.get("created_at")]
+            forms.append({
+                "form_id": form_id,
+                "form_state": form.get("state", ""),
+                "published_versions": len(versions),
+                "submissions": len(submissions),
+                "retained_versions": retained_versions_by_form.get(form_id, 0),
+                "latest_submission_at": max(dates) if dates else "",
+            })
+        snapshot = {
+            "schema": "methodmesh.sentinel.project_health_snapshot.v1",
+            "project_id": self.project_id,
+            "run_id": run_id,
+            "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "project_api_status": project_status,
+            "project_metadata": {
+                key: project_metadata.get(key)
+                for key in ("id", "name", "createdAt", "updatedAt", "archived")
+                if key in project_metadata
+            },
+            "audit_form_id": self.client.config.audit_form_id,
+            "audit_form_version": getattr(self.client.config, "audit_form_version", "1"),
+            "source_forms": forms,
+            "source_form_count": len(forms),
+            "planned_source_records": len(plan.tasks),
+            "server_audit_enabled": bool(getattr(self.client.config, "server_audit_enabled", False)),
+        }
+        snapshot_bytes = (json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
+        audit_id = audit_instance_id(self.project_id, "project-health", run_id, run_id)
+        fields = {
+            "record_type": "project_health_snapshot",
+            "project_id": self.project_id,
+            "source_form_id": "",
+            "source_instance_id": "",
+            "source_version_id": run_id,
+            "source_audit_instance_id": audit_id,
+            "source_content_sha256": _sha(snapshot_bytes),
+            "collect_audit_sha256": "",
+            "central_created_at": snapshot["observed_at"],
+            "central_actor_id": "",
+            "change_reason": "Project health snapshot",
+            "reason_link_status": "sentinel_platform_observation",
+            "timestamp_status": "covered_by_run_manifest",
+            "timestamp_time": "",
+            "timestamp_batch_id": run_id,
+            "timestamp_batch_sha256": "",
+            "timestamp_manifest": "platform_snapshot.json",
+            "timestamp_token": "",
+            "timestamp_token_sha256": "",
+            "timestamp_certificate": "",
+            "sentinel_run_id": run_id,
+            "checkpoint_cursor": str(len(plan.tasks)),
+        }
+        self.sink.submit(
+            self.client.config.audit_form_id,
+            _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
+                       self.client.config.audit_form_id),
+            {"platform_snapshot.json": snapshot_bytes},
+        )
+        return fields
 
     def _server_audit_start(self) -> str | None:
         configured = getattr(self.client.config, "server_audit_start", "")
@@ -474,6 +562,7 @@ class ProjectAuditor:
                 "project_checkpoint": "The project crawl checkpoint",
                 "run_timestamp_manifest": "The manifest for this Sentinel run",
                 "validation_certificate": "Automated checks for this Sentinel run",
+                "project_health_snapshot": "Project-level Central API health and inventory observation",
             },
             "records": records,
         }
@@ -522,7 +611,10 @@ class ProjectAuditor:
             _validation_check("audit_form_configured", bool(self.client.config.audit_form_id), "Audit form configured"),
             _validation_check("source_scope_discovered", bool(plan.forms), "Configured source-form scope discovered"),
             _validation_check("deterministic_ids_unique", len(ids) == len(set(ids)), "No duplicate audit IDs in run"),
-            _validation_check("run_reconciled", len(records) == len(plan.tasks), "Every planned task has a run result"),
+            _validation_check(
+                "run_reconciled", len(records) == len(plan.tasks) + 1,
+                "Every planned task and the project health snapshot has a run result",
+            ),
             _validation_check(
                 "manifest_chain", previous.get("status") in {"genesis", "previous_manifest_verified"},
                 f"Previous manifest status: {previous.get('status', 'unknown')}",
@@ -548,6 +640,7 @@ class ProjectAuditor:
                 "forms": len(plan.forms),
                 "planned_records": len(plan.tasks),
                 "run_records": len(records),
+                "platform_snapshots": sum(record.get("record_type") == "project_health_snapshot" for record in records),
                 "submitted": sum(record.get("status") == "submitted" for record in records),
                 "already_present": sum(record.get("status") == "already_present" for record in records),
             },

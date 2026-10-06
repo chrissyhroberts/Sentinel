@@ -17,6 +17,9 @@ class FakeClient:
     def forms(self):
         return [{"xmlFormId": "trial"}, {"xmlFormId": "sentinel_project_audit"}]
 
+    def project(self):
+        return {"id": 16, "name": "Test project", "archived": False}
+
     def submissions(self, form_id):
         if form_id == "sentinel_project_audit":
             return []
@@ -73,7 +76,7 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(summary.forms_seen, 1)
         self.assertEqual(summary.versions_submitted, 1)
         self.assertEqual(summary.form_versions_submitted, 1)
-        self.assertEqual(len(sink.submissions), 5)
+        self.assertEqual(len(sink.submissions), 6)
         submission = [item for item in sink.submissions if b"linked_collect_audit" in item[1]][0]
         self.assertIn(b"<record_type>submission_edit</record_type>", submission[1])
         self.assertIn(b"<central_actor_id>user@example.org</central_actor_id>", submission[1])
@@ -90,6 +93,9 @@ class CrawlerTests(unittest.TestCase):
         certificate = [item for item in sink.submissions if b"<record_type>validation_certificate</record_type>" in item[1]][0]
         self.assertEqual(set(certificate[2]), {"validation_certificate.json"})
         self.assertIn(b'"status": "passed_with_warnings"', certificate[2]["validation_certificate.json"])
+        snapshot = [item for item in sink.submissions if b"<record_type>project_health_snapshot</record_type>" in item[1]][0]
+        self.assertEqual(set(snapshot[2]), {"platform_snapshot.json"})
+        self.assertIn(b'"retained_versions": 1', snapshot[2]["platform_snapshot.json"])
 
 
 if __name__ == "__main__":

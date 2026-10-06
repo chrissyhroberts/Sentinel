@@ -92,6 +92,14 @@ contains the automated check results and is independently timestamped using
 the same preferred/required policy. A certificate with warnings is still
 preserved for review; a required timestamp failure stops the run.
 
+Each run also submits a `project_health_snapshot` record with a
+`platform_snapshot.json` attachment. It captures project-account-visible
+Central observations such as project metadata, source-form inventory, form
+version counts, submission counts, retained-version counts and latest
+submission times. It deliberately excludes host-wide metrics such as disk
+space, uptime, CPU, memory and backups; those require a separately privileged
+Admin Sentinel.
+
 ## Failure and recovery behavior
 
 Sentinel is designed to degrade safely. With the default preferred timestamp

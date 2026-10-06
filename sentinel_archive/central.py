@@ -92,6 +92,13 @@ class CentralClient:
         suffix = "?deleted=true" if deleted else ""
         return _items(self.get_json(f"/v1/projects/{_quote(self.config.project_id)}/forms{suffix}"))
 
+    def project(self) -> dict[str, Any]:
+        value = self._request(
+            "GET", f"/v1/projects/{_quote(self.config.project_id)}?forms=true",
+            accept="application/json", extra_headers={"X-Extended-Metadata": "true"},
+        )
+        return dict(value)
+
     def server_audits(self, *, start: str | None = None, limit: int = 1000,
                       offset: int = 0) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

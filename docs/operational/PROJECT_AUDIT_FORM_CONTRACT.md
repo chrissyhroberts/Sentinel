@@ -41,6 +41,7 @@ submission UUID; Sentinel does not copy it into the audit form.
 | `project_checkpoint` | The crawl checkpoint for the configured project |
 | `run_timestamp_manifest` | The manifest covering one Sentinel run |
 | `validation_certificate` | Automated validation and reconciliation results for one Sentinel run |
+| `project_health_snapshot` | Non-participant project/API inventory observed during one Sentinel run |
 
 Each run also creates a `run_timestamp_manifest` record. Its
 `timestamp_batch_sha256` is the SHA-256 of the attached `timestamp_manifest.json`,
@@ -68,6 +69,14 @@ fetching work, so completed versions are not repeated.
 
 No project-specific field names, participant fields, XLSForm recipes, or
 MethodMesh attestation payloads are required.
+
+Each run also creates one `project_health_snapshot` record. Its
+`platform_snapshot.json` attachment records project metadata and the
+project-account-visible inventory of source forms, published form versions,
+submission counts, retained submission-version counts and latest submission
+times. It does not claim to measure server disk space, uptime, CPU, memory,
+backups or other host-wide infrastructure; those metrics belong to a
+separately privileged Admin Sentinel.
 
 The server-wide Central audit feed is not required for the basic workflow. If
 enabled with `server_audit_enabled`, it requires a Server Administrator account
