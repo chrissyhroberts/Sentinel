@@ -28,6 +28,7 @@ class CentralConfig:
     timestamp_url: str = "https://tsr.open-tsa.eu"
     server_audit_start: str = ""
     server_audit_enabled: bool = False
+    validation_form_ids: tuple[str, ...] = ()
 
 
 class CentralClient:

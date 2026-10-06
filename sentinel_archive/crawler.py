@@ -54,9 +54,13 @@ class ProjectAuditor:
         except (AttributeError, TypeError):
             pass
         audit_form = self.client.config.audit_form_id
+        validation_forms = set(getattr(self.client.config, "validation_form_ids", ()))
         if not any((form.get("xmlFormId") or form.get("formId")) == audit_form for form in all_forms):
             raise RuntimeError(f"Audit form {audit_form!r} was not found in project {self.project_id}")
-        forms = tuple(form for form in all_forms if (form.get("xmlFormId") or form.get("formId")) != audit_form)
+        forms = tuple(
+            form for form in all_forms
+            if (form.get("xmlFormId") or form.get("formId")) not in {audit_form, *validation_forms}
+        )
         tasks: list[tuple[str, str, str, str, dict[str, Any]]] = []
         for form in forms:
             form_id = str(form.get("xmlFormId") or form.get("formId"))
@@ -182,6 +186,7 @@ class ProjectAuditor:
             for form in forms
             if (form.get("xmlFormId") or form.get("formId")) != audit_form
         }
+        form_ids -= set(getattr(self.client.config, "validation_form_ids", ()))
         form_ids.discard("")
         form_numeric_ids = {str(form.get("id")) for form in forms if form.get("id") is not None}
         submission_ids = {task[2] for task in source_tasks if task[0] == "submission_version"}

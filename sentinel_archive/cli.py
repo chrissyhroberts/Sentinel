@@ -34,6 +34,7 @@ def main() -> None:
         timestamp_url=config.get("timestamp_url", "https://tsr.open-tsa.eu"),
         server_audit_start=config.get("server_audit_start", ""),
         server_audit_enabled=bool(config.get("server_audit_enabled", False)),
+        validation_form_ids=tuple(str(value) for value in config.get("validation_form_ids", [])),
     )
     email = config.get("email")
     if email and not os.environ.get(central_config.token_env):

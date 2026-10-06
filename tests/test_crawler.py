@@ -77,6 +77,13 @@ class CrawlerTests(unittest.TestCase):
         self.assertIn("Sentinel", report["components"])
         self.assertTrue(all(check["status"] == "pass" for check in report["checks"]))
 
+    def test_validation_forms_are_excluded_from_source_scope(self):
+        client = FakeClient()
+        client.config.validation_form_ids = ("trial",)
+        plan = ProjectAuditor(client).plan()
+        self.assertEqual(plan.forms, ())
+        self.assertEqual(plan.tasks, ())
+
     def test_project_scope_and_resume_record(self):
         sink = FakeSink()
         auditor = ProjectAuditor(FakeClient(), sink)
