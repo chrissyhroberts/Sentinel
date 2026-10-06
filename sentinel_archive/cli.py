@@ -9,7 +9,7 @@ from pathlib import Path
 from .central import CentralClient, CentralConfig
 from .crawler import ProjectAuditor
 from .project import audit_instance_id
-from .validation import validate_plan, validation_error
+from .validation import validate_plan, validation_error, write_validation_artifacts
 
 
 def main() -> None:
@@ -18,6 +18,8 @@ def main() -> None:
     parser.add_argument("--plan-only", action="store_true", help="discover and print pending work without submitting anything")
     parser.add_argument("--debug", action="store_true", help="print progress and retry diagnostics to the terminal")
     parser.add_argument("--validate", action="store_true", help="run read-only automated validation checks")
+    parser.add_argument("--validation-output", type=Path, default=Path(".sentinel-local/validation"),
+                        help="directory for validation_report.json and validation_certificate.pdf")
     parser.add_argument("--download-xml", nargs=3, metavar=("FORM_ID", "INSTANCE_ID", "OUTPUT"),
                         help="download one Central submission XML for diagnostics")
     args = parser.parse_args()
@@ -49,11 +51,15 @@ def main() -> None:
         plan = auditor.plan()
     except Exception as error:
         if args.validate:
-            print(json.dumps(validation_error(central_config.project_id, error), indent=2))
+            report = validation_error(central_config.project_id, error)
+            artifacts = write_validation_artifacts(report, args.validation_output)
+            print(json.dumps({"report": report, "artifacts": artifacts}, indent=2))
             return
         raise
     if args.validate:
-        print(json.dumps(validate_plan(client, plan), indent=2))
+        report = validate_plan(client, plan)
+        artifacts = write_validation_artifacts(report, args.validation_output)
+        print(json.dumps({"report": report, "artifacts": artifacts}, indent=2))
         return
     pending = [task for task in plan.tasks if audit_instance_id(
         client.config.project_id, task[1], task[2], task[3]) not in plan.existing_audit_ids]

@@ -119,3 +119,25 @@ part of this current baseline.
 
 This is an engineering pilot, not a validated production clinical-trial
 system.
+
+## Automated validation outputs
+
+Run the read-only validation review with:
+
+```text
+python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --validate
+```
+
+By default this writes two paired artifacts under
+`.sentinel-local/validation/`:
+
+- `validation_report.json` - the machine-readable authoritative report;
+- `validation_certificate.pdf` - the human-readable certificate, with one row
+  per test, component ownership, mode, pass/fail result and a link to the JSON
+  evidence bundle.
+
+The PDF is a review view, not a replacement for the JSON. Central checks state
+what the configured Central account could observe or read; Sentinel checks
+state what Sentinel itself verified. The certificate does not silently claim
+validation of Collect, Enketo, MethodMesh or host infrastructure unless those
+tests are explicitly present and evidenced.

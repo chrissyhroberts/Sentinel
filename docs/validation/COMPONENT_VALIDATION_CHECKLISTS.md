@@ -15,6 +15,8 @@ python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --validate
 
 It is read-only. It produces a JSON validation report covering the configured
 Central project and Sentinel configuration; it does not submit or edit data.
+It also writes a paired `validation_certificate.pdf` for human review. The
+JSON remains authoritative and the PDF links each row back to that report.
 
 Detailed checklists:
 
