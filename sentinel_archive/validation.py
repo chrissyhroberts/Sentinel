@@ -134,7 +134,16 @@ def write_validation_artifacts(report: dict[str, Any], output_dir: str | Path) -
     report_path = destination / "validation_report.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     pdf_path = destination / "validation_certificate.pdf"
-    _write_validation_pdf(report, pdf_path)
+    try:
+        _write_validation_pdf(report, pdf_path)
+    except ModuleNotFoundError as error:
+        if error.name != "reportlab":
+            raise
+        return {
+            "json": str(report_path),
+            "pdf": "",
+            "pdf_error": "PDF certificate not generated: install the project dependencies with `python3 -m pip install -e .`",
+        }
     return {"json": str(report_path), "pdf": str(pdf_path)}
 
 

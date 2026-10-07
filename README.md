@@ -128,6 +128,13 @@ Run the read-only validation review with:
 python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --validate
 ```
 
+Install the project dependencies once in the same Python environment used to
+run Sentinel so the PDF certificate can be generated:
+
+```text
+python3 -m pip install -e .
+```
+
 By default this writes two paired artifacts under
 `.sentinel-local/validation/`:
 
