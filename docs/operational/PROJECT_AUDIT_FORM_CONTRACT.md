@@ -56,6 +56,7 @@ submission UUID; Sentinel does not copy it into the audit form.
 | `run_timestamp_manifest` | The manifest covering one Sentinel run |
 | `validation_certificate` | Automated validation and reconciliation results for one Sentinel run |
 | `project_health_snapshot` | Non-participant project/API inventory observed during one Sentinel run |
+| `admin_platform_snapshot` | Privileged, time-scoped Central administration and platform snapshot |
 
 Each run also creates a `run_timestamp_manifest` record. Its
 `timestamp_batch_sha256` is the SHA-256 of the attached `timestamp_manifest.json`,
@@ -100,6 +101,11 @@ times. `platform_snapshot.pdf` is the corresponding human-readable copy. It
 does not claim to measure server disk space, uptime, CPU, memory,
 backups or other host-wide infrastructure; those metrics belong to a
 separately privileged Admin Sentinel.
+
+An explicitly invoked Admin Sentinel run creates one
+`admin_platform_snapshot` record. It uses the existing `platform_snapshot`,
+`platform_snapshot_pdf` and `evidence_package` attachment fields, so no
+audit-form redesign is required. See [Admin Sentinel](ADMIN_SENTINEL.md).
 
 The server-wide Central audit feed is not required for the basic workflow. If
 enabled with `server_audit_enabled`, it requires a Server Administrator account

@@ -29,6 +29,11 @@ class CentralConfig:
     server_audit_start: str = ""
     server_audit_enabled: bool = False
     validation_form_ids: tuple[str, ...] = ()
+    admin_project_ids: tuple[str, ...] = ()
+    admin_audit_start: str = ""
+    admin_audit_end: str = ""
+    admin_host_snapshot_path: str = ""
+    admin_assignment_roles: tuple[str, ...] = ("manager", "viewer", "dataCollector")
 
 
 class CentralClient:
@@ -115,13 +120,15 @@ class CentralClient:
         )
         return dict(value)
 
-    def server_audits(self, *, start: str | None = None, limit: int = 1000,
+    def server_audits(self, *, start: str | None = None, end: str | None = None, limit: int = 1000,
                       offset: int = 0) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         while True:
             query = f"limit={int(limit)}&offset={int(offset)}"
             if start:
                 query += f"&start={urllib.parse.quote(str(start), safe='') }"
+            if end:
+                query += f"&end={urllib.parse.quote(str(end), safe='') }"
             path = f"/v1/audits?{query}"
             value = self._request(
                 "GET", path, accept="application/json",
@@ -132,6 +139,31 @@ class CentralClient:
             if len(page) < limit:
                 return result
             offset += limit
+
+    def projects(self) -> list[dict[str, Any]]:
+        return _items(self._request(
+            "GET", "/v1/projects", accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def roles(self) -> list[dict[str, Any]]:
+        return _items(self.get_json("/v1/roles"))
+
+    def assignments(self) -> list[dict[str, Any]]:
+        return _items(self._request(
+            "GET", "/v1/assignments", accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def project_assignments(self, project_id: str, role_id: str) -> list[dict[str, Any]]:
+        path = f"/v1/projects/{_quote(project_id)}/assignments/{_quote(role_id)}"
+        return _items(self.get_json(path))
+
+    def system_config(self, key: str) -> dict[str, Any]:
+        return dict(self.get_json(f"/v1/config/{_quote(key)}"))
+
+    def analytics_preview(self) -> Any:
+        return self.get_json("/v1/analytics/preview")
 
     def submissions(self, form_id: str) -> list[dict[str, Any]]:
         return _items(self.get_json(self._form_path(form_id) + "/submissions"))

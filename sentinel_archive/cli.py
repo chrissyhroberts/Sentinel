@@ -9,6 +9,7 @@ from pathlib import Path
 from .central import CentralClient, CentralConfig
 from .crawler import ProjectAuditor
 from .project import audit_instance_id
+from .admin import run_admin_validation
 from .validation import (run_active_validation, submit_active_validation_evidence,
                          validate_plan, validation_error, write_validation_artifacts)
 
@@ -21,8 +22,12 @@ def main() -> None:
     parser.add_argument("--validate", action="store_true", help="run read-only automated validation checks")
     parser.add_argument("--validate-active", action="store_true",
                         help="create/edit synthetic validation data and verify the Central/Sentinel path")
+    parser.add_argument("--admin-validate", action="store_true",
+                        help="run the privileged, manually initiated administrative snapshot")
     parser.add_argument("--validation-output", type=Path, default=Path(".sentinel-local/validation"),
                         help="directory for validation_report.json and validation_certificate.pdf")
+    parser.add_argument("--admin-output", type=Path, default=Path(".sentinel-local/admin-validation"),
+                        help="directory for the privileged administrative snapshot and evidence package")
     parser.add_argument("--download-xml", nargs=3, metavar=("FORM_ID", "INSTANCE_ID", "OUTPUT"),
                         help="download one Central submission XML for diagnostics")
     args = parser.parse_args()
@@ -38,18 +43,37 @@ def main() -> None:
         server_audit_start=config.get("server_audit_start", ""),
         server_audit_enabled=bool(config.get("server_audit_enabled", False)),
         validation_form_ids=tuple(str(value) for value in config.get("validation_form_ids", [])),
+        admin_project_ids=tuple(str(value) for value in config.get("admin_project_ids", [])),
+        admin_audit_start=str(config.get("admin_audit_start", "")),
+        admin_audit_end=str(config.get("admin_audit_end", "")),
+        admin_host_snapshot_path=str(config.get("admin_host_snapshot_path", "")),
+        admin_assignment_roles=tuple(str(value) for value in config.get(
+            "admin_assignment_roles", ["manager", "viewer", "dataCollector"])),
     )
-    email = config.get("email")
-    if email and not os.environ.get(central_config.token_env):
-        password = getpass.getpass(f"Central password for {email}: ")
+    if args.admin_validate:
+        email = config.get("admin_email")
+        if not email:
+            raise SystemExit("--admin-validate requires admin_email in the Sentinel config")
+        password = getpass.getpass(f"Central administrator password for {email}: ")
         client = CentralClient.login(central_config, email, password, debug=args.debug)
     else:
-        client = CentralClient(central_config, debug=args.debug)
+        email = config.get("email")
+        stored_password = config.get("password") or (
+            os.environ.get(str(config.get("password_env"))) if config.get("password_env") else None
+        )
+        if email and not os.environ.get(central_config.token_env):
+            password = stored_password or getpass.getpass(f"Central password for {email}: ")
+            client = CentralClient.login(central_config, email, password, debug=args.debug)
+        else:
+            client = CentralClient(central_config, debug=args.debug)
     auditor = ProjectAuditor(client)
     if args.download_xml:
         form_id, instance_id, output = args.download_xml
         Path(output).write_bytes(client.submission_xml(form_id, instance_id))
         print(output)
+        return
+    if args.admin_validate:
+        print(json.dumps(run_admin_validation(client, args.admin_output), indent=2))
         return
     if args.validate_active:
         report = run_active_validation(client)

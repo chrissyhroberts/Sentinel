@@ -27,8 +27,9 @@ Run Sentinel from the repository root with:
 python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --debug
 ```
 
-The directory is gitignored. Passwords are entered interactively and are not
-saved by Sentinel.
+The directory is gitignored. A normal run can use the regular account with an
+interactive password prompt, `password_env`, or a locally stored `password`.
+The privileged admin run always prompts for its administrator password.
 
 The audit boundary is always one explicitly configured Central project. See
 the [universal project audit form contract](docs/operational/PROJECT_AUDIT_FORM_CONTRACT.md).
@@ -69,6 +70,23 @@ When enabled, the first lifecycle backfill can be bounded with
 `server_audit_start`. Later runs use the latest audit-form submission time as
 the next cursor, with a small overlap. If disabled, no server-wide audit call
 is made.
+
+## Privileged monthly administration snapshot
+
+Run the separate administrator review explicitly:
+
+```sh
+python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --admin-validate
+```
+
+Configure `admin_email`, `admin_project_ids`, optional `admin_audit_start` and
+`admin_audit_end`, and optional `admin_host_snapshot_path`. The admin password
+is prompted for interactively. A blank window covers the preceding 31 days.
+The run submits one `admin_platform_snapshot` record containing the scoped
+Central administration evidence and JSON/PDF/ZIP outputs. Host disk space and
+uptime are not exposed by the ordinary Central API; supply them through the
+optional host snapshot JSON when required. See
+`docs/operational/ADMIN_SENTINEL.md`.
 
 ## Evidence and storage boundary
 
