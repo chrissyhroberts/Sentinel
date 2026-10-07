@@ -8,7 +8,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any
 
@@ -62,26 +61,30 @@ class CentralClient:
         return result
 
     def submit(self, form_id: str, xml: bytes, attachments: dict[str, bytes]) -> None:
-        fields = {"xml_submission_file": ("submission.xml", xml, "text/xml")}
-        self._request(
-            "POST",
-            f"/v1/projects/{_quote(self.config.project_id)}/submission",
-            accept="text/xml",
-            raw=True,
-            multipart=fields,
-            extra_headers={"X-OpenRosa-Version": "1.0"},
-        )
-        if attachments:
-            root = ET.fromstring(xml)
-            instance = next((node.text for node in root.iter() if node.tag.endswith("instanceID")), None)
-            if not instance:
-                raise CentralError("Audit submission XML did not contain an instanceID")
-            for filename, data in attachments.items():
-                # Central's attachment endpoint receives opaque binary data.
-                # In particular, application/json can be parsed as an API body
-                # instead of being stored as the JSON attachment bytes.
-                self.upload_attachment(form_id, instance, filename, data,
-                                       content_type="application/octet-stream")
+        path = f"/v1/projects/{_quote(self.config.project_id)}/submission"
+
+        def post_submission(filename: str | None = None, data: bytes | None = None) -> None:
+            fields = {"xml_submission_file": ("submission.xml", xml, "text/xml")}
+            if filename is not None and data is not None:
+                fields[filename] = (
+                    filename,
+                    data,
+                    mimetypes.guess_type(filename)[0] or "application/octet-stream",
+                )
+            self._request(
+                "POST", path, accept="text/xml", raw=True, multipart=fields,
+                extra_headers={"X-OpenRosa-Version": "1.0"},
+            )
+
+        if not attachments:
+            post_submission()
+            return
+        # Central supports adding attachments through repeated OpenRosa POSTs,
+        # provided the XML is byte-for-byte identical on every request. This is
+        # the supported path for expected file slots and avoids relying on a
+        # separate REST attachment route for newly created submissions.
+        for filename, data in attachments.items():
+            post_submission(filename, data)
 
     def create_validation_submission(self, form_id: str, xml: bytes, *, device_id: str) -> dict[str, Any]:
         """Create a synthetic validation submission through Central's REST API."""
