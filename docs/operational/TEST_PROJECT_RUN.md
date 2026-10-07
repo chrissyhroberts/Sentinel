@@ -1,6 +1,6 @@
 # Test-project run
 
-Publish `docs/odk_forms/audit/project_audit_sentinel_v1.xlsx` in the selected Central project,
+Publish `docs/odk_forms/audit/audit_001_v6.xlsx` in the selected Central project,
 give the Sentinel account read access to source forms and submit access to the
 audit form, then create a local configuration file outside the repository:
 
@@ -9,8 +9,8 @@ audit form, then create a local configuration file outside the repository:
   "base_url": "https://central.example.org",
   "project_id": "123",
   "email": "your-central-email@example.org",
-  "audit_form_id": "sentinel_project_audit",
-  "audit_form_version": "1",
+  "audit_form_id": "audit_001",
+  "audit_form_version": "6",
   "timestamp_policy": "preferred",
   "timestamp_url": "https://tsr.open-tsa.eu",
   "token_env": "ODK_CENTRAL_TOKEN"

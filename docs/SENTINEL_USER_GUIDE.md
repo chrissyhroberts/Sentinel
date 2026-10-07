@@ -89,9 +89,9 @@ README.md                                 Quick-start documentation
 CHANGELOG.md                              Release history
 ```
 
-The MethodMesh compiler material under `docs/odk_forms/methodmesh_examples/`
-contains earlier/legacy material. Do not silently restore the old frozen
-whole-payload commitment as the new Sentinel contract.
+The former root-level `METHODMESH_SENTINEL_MASTER_BOOK_v0.1.md` and the old
+MethodMesh compiler/example tree were removed because they described a
+superseded platform and frozen whole-payload architecture.
 
 ## 4. Central setup
 
