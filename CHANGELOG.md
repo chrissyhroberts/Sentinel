@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — 2026-10-07
+
+- reconstructs the retained Sentinel run-manifest chain on every regular run;
+- reports intact chains, orphan rows, missing rows, unreadable attachments,
+  hash mismatches and cycles in the daily QA snapshot and certificate;
+- records the first affected timepoint and expected missing audit row when a
+  chain break is detected;
+- documents UUID-level MethodMesh attestation as complementary evidence rather
+  than requiring a fragile reconstructed whole-record hash.
+
 ## 0.2.0 — 2026-10-07
 
 This release establishes the current Sentinel archival and QA baseline.

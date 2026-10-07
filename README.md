@@ -106,6 +106,13 @@ link. If the TSA is unavailable, the manifest is retained with an explicit
 non-timestamped status. Sentinel does not use a per-source-record
 `previous_attestation_hash` chain.
 
+Each daily run also reconstructs the retained run-manifest chain from the audit
+form. The QA snapshot reports `intact`, `intact_with_orphans`, `broken`, or
+`genesis`, with the first affected timepoint, expected missing audit row and
+reason when a link cannot be verified. This is a reconciliation of Sentinel's
+run-level evidence rows; it is not a replacement for Central's source records
+and does not require MethodMesh to hash a reconstructed form payload.
+
 Completed records are not rewritten. A subsequent run skips an existing
 deterministic record and only submits new source versions or new enabled audit
 events.

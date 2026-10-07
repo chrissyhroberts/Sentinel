@@ -155,15 +155,18 @@ class ProjectAuditor:
                 })
                 if getattr(self.client, "debug", False):
                     print("[debug] Central already has this audit record; continuing", file=sys.stderr)
-        snapshot_fields, snapshot_attachments = self._submit_platform_snapshot(plan, run_id, submit=False)
+        previous = self._previous_manifest_reference()
+        chain_report = self._reconstruct_manifest_chain()
+        snapshot_fields, snapshot_attachments = self._submit_platform_snapshot(
+            plan, run_id, chain_report=chain_report, submit=False)
         users_fields, users_attachments = self._submit_user_roles_snapshot(run_id, submit=False)
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped, run_id=run_id)
-        previous = self._previous_manifest_reference()
-        manifest_fields, manifest_attachments = self._submit_run_manifest(run_id, run_records, previous, submit=False)
+        manifest_fields, manifest_attachments = self._submit_run_manifest(
+            run_id, run_records, previous, chain_report, submit=False)
         validation_fields, validation_attachments = self._submit_validation_certificate(
-            run_id, plan, run_records, previous, manifest_fields, submit=False)
+            run_id, plan, run_records, previous, manifest_fields, chain_report, submit=False)
         for key in ("project_health_snapshot", "project_health_snapshot_pdf",
                     "project_user_roles_snapshot", "project_user_roles_snapshot_pdf"):
             if snapshot_fields.get(key):
@@ -242,7 +245,9 @@ class ProjectAuditor:
             tasks.append(("central_event", "central-event", event_key, event_key, metadata))
         return tasks
 
-    def _submit_platform_snapshot(self, plan: AuditPlan, run_id: str, *, submit: bool = True):
+    def _submit_platform_snapshot(self, plan: AuditPlan, run_id: str, *,
+                                  chain_report: dict[str, Any] | None = None,
+                                  submit: bool = True):
         project_status = "available"
         project_metadata: dict[str, Any] = {}
         try:
@@ -374,6 +379,7 @@ class ProjectAuditor:
             "source_form_count": len(forms),
             "planned_source_records": len(plan.tasks),
             "server_audit_enabled": bool(getattr(self.client.config, "server_audit_enabled", False)),
+            "manifest_chain": chain_report or {"status": "not_run"},
             "actor_properties": self._safe_project_read(
                 "actor_properties", lambda: self.client.actor_properties(self.project_id)
             ),
@@ -918,14 +924,168 @@ class ProjectAuditor:
             return {"status": "genesis"}
         return max(candidates, key=lambda item: item[0])[1]
 
+    def _reconstruct_manifest_chain(self) -> dict[str, Any]:
+        """Rebuild the retained run-manifest chain from Central evidence.
+
+        This is deliberately a run-level reconciliation.  It does not create
+        or require a hash chain over source records, and it does not treat a
+        missing RFC3161 token as a missing audit record.  A break means that a
+        manifest referenced by a later manifest cannot be found, read, or has
+        a different attached-manifest hash.
+        """
+        report: dict[str, Any] = {
+            "schema": "methodmesh.sentinel.manifest_chain_reconciliation.v1",
+            "status": "unavailable",
+            "manifests_found": 0,
+            "linked_manifests": 0,
+            "orphan_manifests": [],
+            "breaks": [],
+            "missing_rows": [],
+        }
+        try:
+            submissions = self.client.submissions(self.client.config.audit_form_id)
+        except (AttributeError, CentralError) as error:
+            report["detail"] = f"Audit-form submissions unavailable: {type(error).__name__}"
+            return report
+
+        manifests: dict[str, dict[str, Any]] = {}
+        for submission in submissions:
+            instance_id = str(submission.get("instanceId") or submission.get("id") or "")
+            if not instance_id:
+                continue
+            try:
+                xml = self.client.version_xml(
+                    self.client.config.audit_form_id, instance_id, instance_id
+                )
+                root = ET.fromstring(xml)
+            except (AttributeError, CentralError, ET.ParseError):
+                continue
+            values = {
+                element.tag.rsplit("}", 1)[-1]: str(element.text or "")
+                for element in root
+            }
+            if values.get("record_type") != "sentinel_run_qa_snapshot":
+                continue
+            manifest_hash = values.get("timestamp_batch_sha256", "")
+            if not manifest_hash:
+                continue
+            item: dict[str, Any] = {
+                "audit_instance_id": instance_id,
+                "manifest_sha256": manifest_hash,
+                "created_at": values.get("central_created_at") or submission.get("createdAt", ""),
+                "status": "unreadable",
+                "chain": {},
+            }
+            try:
+                attachments = self.client.version_attachments(
+                    self.client.config.audit_form_id, instance_id, instance_id
+                )
+                manifest_name = next(
+                    (str(entry.get("name")) for entry in attachments
+                     if entry.get("exists") and str(entry.get("name", "")).endswith("timestamp_manifest.json")),
+                    None,
+                )
+                if not manifest_name:
+                    item["status"] = "attachment_missing"
+                else:
+                    raw = self.client.attachment_bytes(
+                        self.client.config.audit_form_id, instance_id, instance_id, manifest_name
+                    )
+                    item["attached_sha256"] = _sha(raw)
+                    if item["attached_sha256"] != manifest_hash:
+                        item["status"] = "hash_mismatch"
+                    else:
+                        manifest = json.loads(raw.decode("utf-8"))
+                        item["chain"] = manifest.get("chain") or {}
+                        item["status"] = "verified"
+            except (AttributeError, CentralError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                item["status"] = "unreadable"
+                item["error"] = type(error).__name__
+            manifests[instance_id] = item
+
+        report["manifests_found"] = len(manifests)
+        if not manifests:
+            report.update({"status": "genesis", "detail": "No prior Sentinel run manifests found."})
+            return report
+
+        latest = max(manifests.values(), key=lambda item: _parse_time(item.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc))
+        current = latest
+        visited: list[str] = []
+        while current:
+            current_id = str(current["audit_instance_id"])
+            if current_id in visited:
+                report["breaks"].append({
+                    "break_at": current.get("created_at", ""),
+                    "from_audit_instance_id": current_id,
+                    "reason": "cycle_detected",
+                })
+                break
+            visited.append(current_id)
+            previous = current.get("chain") or {}
+            previous_status = str(previous.get("status") or "")
+            if previous_status == "genesis" or not previous.get("audit_instance_id"):
+                break
+            previous_id = str(previous.get("audit_instance_id"))
+            expected_hash = str(previous.get("manifest_sha256") or "")
+            target = manifests.get(previous_id)
+            if target is None:
+                report["breaks"].append({
+                    "break_at": current.get("created_at", ""),
+                    "from_audit_instance_id": current_id,
+                    "expected_previous_audit_instance_id": previous_id,
+                    "expected_previous_manifest_sha256": expected_hash,
+                    "reason": "missing_manifest_row",
+                })
+                report["missing_rows"].append(previous_id)
+                break
+            if target.get("status") != "verified":
+                report["breaks"].append({
+                    "break_at": target.get("created_at") or current.get("created_at", ""),
+                    "from_audit_instance_id": current_id,
+                    "expected_previous_audit_instance_id": previous_id,
+                    "reason": f"previous_manifest_{target.get('status', 'unavailable')}",
+                })
+                break
+            if expected_hash and target.get("manifest_sha256") != expected_hash:
+                report["breaks"].append({
+                    "break_at": target.get("created_at") or current.get("created_at", ""),
+                    "from_audit_instance_id": current_id,
+                    "expected_previous_audit_instance_id": previous_id,
+                    "expected_previous_manifest_sha256": expected_hash,
+                    "observed_previous_manifest_sha256": target.get("manifest_sha256", ""),
+                    "reason": "previous_manifest_hash_mismatch",
+                })
+                break
+            current = target
+
+        report["linked_manifests"] = len(visited)
+        report["latest_audit_instance_id"] = latest["audit_instance_id"]
+        report["latest_created_at"] = latest.get("created_at", "")
+        report["orphan_manifests"] = sorted(set(manifests) - set(visited))
+        if report["breaks"]:
+            report["status"] = "broken"
+            report["detail"] = "A run manifest link is missing, unreadable, cyclic, or has a hash mismatch."
+        elif latest.get("status") != "verified":
+            report["status"] = "broken"
+            report["detail"] = f"Latest run manifest is {latest.get('status', 'unavailable')}."
+        elif report["orphan_manifests"]:
+            report["status"] = "intact_with_orphans"
+            report["detail"] = "The latest linked chain is intact, but older manifest rows are not linked from it."
+        else:
+            report["status"] = "intact"
+            report["detail"] = "The latest Sentinel run-manifest chain links back to genesis without gaps."
+        return report
+
     def _submit_run_manifest(self, run_id: str, records: list[dict[str, Any]],
-                             previous: dict[str, str], *, submit: bool = True):
+                             previous: dict[str, str], chain_report: dict[str, Any] | None = None,
+                             *, submit: bool = True):
         manifest = {
             "schema": "methodmesh.sentinel.sentinel_run_qa_snapshot.v1",
             "project_id": self.project_id,
             "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "chain": previous,
+            "chain_reconciliation": chain_report or {"status": "not_run"},
             "record_types": {
                 "source_form_version": "A deployed source-form definition version",
                 "original_submission": "The original Central submission version",
@@ -979,7 +1139,9 @@ class ProjectAuditor:
     def _submit_validation_certificate(self, run_id: str, plan: AuditPlan,
                                        records: list[dict[str, Any]],
                                        previous: dict[str, str],
-                                       manifest_fields: dict[str, str], *, submit: bool = True):
+                                       manifest_fields: dict[str, str],
+                                       chain_report: dict[str, Any] | None = None,
+                                       *, submit: bool = True):
         ids = [record.get("audit_instance_id", "") for record in records]
         checks = [
             _validation_check("audit_form_configured", bool(self.client.config.audit_form_id), "Audit form configured"),
@@ -992,6 +1154,12 @@ class ProjectAuditor:
             _validation_check(
                 "manifest_chain", previous.get("status") in {"genesis", "previous_manifest_verified"},
                 f"Previous manifest status: {previous.get('status', 'unknown')}",
+                warning=True,
+            ),
+            _validation_check(
+                "manifest_chain_reconciliation",
+                (chain_report or {}).get("status") in {"genesis", "intact", "intact_with_orphans"},
+                _chain_report_detail(chain_report or {"status": "not_run"}),
                 warning=True,
             ),
             _validation_check(
@@ -1024,6 +1192,7 @@ class ProjectAuditor:
                 "sha256": manifest_fields.get("timestamp_batch_sha256", ""),
                 "timestamp_status": manifest_fields.get("timestamp_status", ""),
             },
+            "manifest_chain": chain_report or {"status": "not_run"},
         }
         certificate_bytes = (json.dumps(certificate, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
         certificate_pdf = _validation_certificate_pdf(certificate)
@@ -1482,6 +1651,7 @@ def _project_qa_summary_pdf(health_bytes: bytes, users_bytes: bytes, validation_
         [p("Validation", body), p(validation_status, body)],
         [p("Source forms / links", body), p(f"{len(forms)} / {sum(_public_link_count(form) for form in forms)}", body)],
         [p("Project users", body), p(len(current_users), body)],
+        [p("Run-manifest chain", body), p(_chain_report_detail(health.get("manifest_chain", {})), body)],
     ]
     project_table = Table(project_rows, colWidths=[35 * mm, 145 * mm])
     project_table.setStyle(TableStyle([
@@ -1677,6 +1847,22 @@ def _validation_check(name: str, passed: bool, detail: str, *, warning: bool = F
     else:
         status = "fail"
     return {"name": name, "status": status, "detail": detail}
+
+
+def _chain_report_detail(report: dict[str, Any]) -> str:
+    status = str(report.get("status") or "unknown")
+    if status == "intact":
+        return f"INTACT ({report.get('linked_manifests', 0)} linked run(s))"
+    if status == "genesis":
+        return "GENESIS (no prior run)"
+    if status == "intact_with_orphans":
+        return f"INTACT WITH ORPHANS ({len(report.get('orphan_manifests', []))} unlinked row(s))"
+    breaks = report.get("breaks") or []
+    if breaks:
+        first = breaks[0]
+        when = first.get("break_at") or "unknown time"
+        return f"BREAK at {when} ({first.get('reason', 'unresolved')})"
+    return status.upper()
 
 
 def _run_id() -> str:

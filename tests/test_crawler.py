@@ -1,4 +1,5 @@
 import json
+import hashlib
 import unittest
 import zipfile
 from pathlib import Path
@@ -169,6 +170,50 @@ class ActiveFakeClient:
 
 
 class CrawlerTests(unittest.TestCase):
+    def test_manifest_chain_reconciliation_finds_intact_chain_and_gap(self):
+        class ChainClient(FakeClient):
+            def __init__(self, broken=False):
+                self.broken = broken
+                self.manifest_bytes = {}
+                first_id = "uuid:sentinel-manifest-first"
+                second_id = "uuid:sentinel-manifest-second"
+                first = {"chain": {"status": "genesis"}}
+                first_bytes = (json.dumps(first, sort_keys=True) + "\n").encode()
+                self.manifest_bytes[first_id] = first_bytes
+                previous_id = "uuid:sentinel-manifest-missing" if broken else first_id
+                second = {"chain": {"status": "previous_manifest_verified",
+                                     "audit_instance_id": previous_id,
+                                     "manifest_sha256": hashlib.sha256(first_bytes).hexdigest()}}
+                self.manifest_bytes[second_id] = (json.dumps(second, sort_keys=True) + "\n").encode()
+
+            def submissions(self, form_id):
+                if form_id != "sentinel_project_audit":
+                    return super().submissions(form_id)
+                return [
+                    {"instanceId": "uuid:sentinel-manifest-first", "createdAt": "2026-10-06T10:00:00Z"},
+                    {"instanceId": "uuid:sentinel-manifest-second", "createdAt": "2026-10-07T10:00:00Z"},
+                ]
+
+            def version_xml(self, form_id, instance_id, version_id):
+                value = self.manifest_bytes[instance_id]
+                digest = hashlib.sha256(value).hexdigest()
+                return (f"<data><record_type>sentinel_run_qa_snapshot</record_type>"
+                        f"<timestamp_batch_sha256>{digest}</timestamp_batch_sha256>"
+                        f"<central_created_at>{'2026-10-06T10:00:00Z' if 'first' in instance_id else '2026-10-07T10:00:00Z'}</central_created_at></data>").encode()
+
+            def version_attachments(self, form_id, instance_id, version_id):
+                return [{"name": "timestamp_manifest.json", "exists": True}]
+
+            def attachment_bytes(self, form_id, instance_id, version_id, filename):
+                return self.manifest_bytes[instance_id]
+
+        intact = ProjectAuditor(ChainClient())._reconstruct_manifest_chain()
+        self.assertEqual(intact["status"], "intact")
+        self.assertEqual(intact["linked_manifests"], 2)
+        broken = ProjectAuditor(ChainClient(broken=True))._reconstruct_manifest_chain()
+        self.assertEqual(broken["status"], "broken")
+        self.assertEqual(broken["missing_rows"], ["uuid:sentinel-manifest-missing"])
+
     def test_form_version_v6_attaches_xml_and_original_xlsx(self):
         client = FakeClient()
         client.config = FakeConfig()

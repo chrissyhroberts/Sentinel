@@ -99,6 +99,14 @@ a run-level, timestamp-anchored chain that can expose an altered or missing
 intermediate manifest. It is deliberately not a `previous_attestation_hash`
 chain on every source record.
 
+On each regular run Sentinel independently walks the retained manifest rows
+backwards from the latest run and compares every referenced audit ID and
+manifest hash. The resulting reconciliation is included in the project health
+snapshot, the manager-facing QA PDF and the validation certificate. A report
+distinguishes an intact chain from an intact chain with orphan rows, a missing
+row, an unreadable attachment, a hash mismatch or a cycle, and records the
+first affected timepoint where available.
+
 Every run carries the validation report and human-readable certificate on the
 same `sentinel_run_qa_snapshot` record. The report includes deterministic-ID
 uniqueness, planned-versus-processed reconciliation, manifest-chain status and
