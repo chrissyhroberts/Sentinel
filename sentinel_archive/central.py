@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any
 
@@ -62,23 +63,22 @@ class CentralClient:
 
     def submit(self, form_id: str, xml: bytes, attachments: dict[str, bytes]) -> None:
         fields = {"xml_submission_file": ("submission.xml", xml, "text/xml")}
-        fields.update({
-            filename: (
-                filename,
-                data,
-                "application/octet-stream",
-            )
-            for filename, data in attachments.items()
-        })
-        # This form-specific REST endpoint is the path used by the original
-        # working Sentinel archive implementation. It accepts the XML and its
-        # expected file slots in one multipart request.
         self._request(
             "POST",
             self._form_path(form_id) + "/submissions",
             accept="application/json",
             multipart=fields,
         )
+        if attachments:
+            root = ET.fromstring(xml)
+            instance = next((node.text for node in root.iter() if node.tag.endswith("instanceID")), None)
+            if not instance:
+                raise CentralError("Audit submission XML did not contain an instanceID")
+            for filename, data in attachments.items():
+                self.upload_attachment(
+                    form_id, instance, filename, data,
+                    content_type="application/octet-stream",
+                )
 
     def create_validation_submission(self, form_id: str, xml: bytes, *, device_id: str) -> dict[str, Any]:
         """Create a synthetic validation submission through Central's REST API."""
