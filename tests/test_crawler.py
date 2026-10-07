@@ -121,8 +121,17 @@ class CrawlerTests(unittest.TestCase):
         client = ActiveFakeClient()
         report = run_active_validation(client)
         self.assertEqual(report["status"], "passed")
-        self.assertEqual(report["summary"], {"checks": 5, "passed": 5, "failed": 0})
+        self.assertEqual(report["summary"], {"checks": 10, "passed": 10, "failed": 0})
         self.assertEqual(report["mode"], "active_synthetic_validation")
+        self.assertEqual(
+            {check["check_id"] for check in report["checks"]},
+            {
+                "central_active_create", "central_active_edit", "central_active_version_records",
+                "central_active_diff", "central_active_reason", "central_active_audit_trail",
+                "central_active_submission_identity", "sentinel_active_hash_change",
+                "sentinel_active_evidence_capture", "sentinel_active_synthetic_scope",
+            },
+        )
         with self.subTest("audit evidence"):
             from tempfile import TemporaryDirectory
             with TemporaryDirectory() as directory:

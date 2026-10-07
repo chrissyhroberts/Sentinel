@@ -53,6 +53,10 @@ def validate_plan(client: Any, plan: AuditPlan) -> dict[str, Any]:
     form_ids = [str(form.get("xmlFormId") or form.get("formId") or "") for form in plan.forms]
     add("central_form_ids_unique", "ODK Central", "automated",
         len(form_ids) == len(set(form_ids)), "Visible source form IDs are unique")
+    source_tasks = [task for task in plan.tasks if task[0] in {"form_version", "submission_version"}]
+    add("central_source_identifiers_present", "ODK Central", "automated",
+        all(str(task[1]) and str(task[3]) for task in source_tasks),
+        f"All {len(source_tasks)} planned source records have form and version identifiers")
     add("central_source_versions", "ODK Central", "automated", True,
         f"Discovered {sum(task[0] == 'form_version' for task in plan.tasks)} form version(s) and "
         f"{sum(task[0] == 'submission_version' for task in plan.tasks)} submission version(s)")
@@ -70,6 +74,13 @@ def validate_plan(client: Any, plan: AuditPlan) -> dict[str, Any]:
             f"Could not read a form definition: {type(error).__name__}")
 
     task_ids = ["\x1f".join((config.project_id, task[1], task[2], task[3])) for task in plan.tasks]
+    add("sentinel_task_ids_unique", "Sentinel", "automated",
+        len(task_ids) == len(set(task_ids)), "Planned source tasks have unique reconciliation keys")
+    validation_form_ids = tuple(str(value) for value in getattr(config, "validation_form_ids", ()))
+    add("sentinel_validation_scope", "Sentinel", "automated",
+        len(validation_form_ids) == len(set(validation_form_ids))
+        and not set(validation_form_ids).intersection(form_ids + [str(config.audit_form_id)]),
+        "Configured validation forms are unique and excluded from source scope")
     audit_ids = [audit_instance_id(config.project_id, task[1], task[2], task[3]) for task in plan.tasks]
     add("sentinel_deterministic_ids", "Sentinel", "automated",
         len(audit_ids) == len(set(audit_ids)), "All discovered source tasks have unique deterministic audit IDs")
@@ -181,13 +192,29 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         audit_text = json.dumps(audits, sort_keys=True)
         add("central_active_edit", current_value == "CENTRAL-B" and len(versions) >= 2,
             f"Retrieved edited value and {len(versions)} retained submission versions")
+        add("central_active_version_records", len(versions) >= 2 and all(isinstance(item, dict) for item in versions),
+            "Central returned structured records for the original and edited versions")
         add("central_active_diff", "CENTRAL-A" in diff_text and "CENTRAL-B" in diff_text,
             "Central diff evidence contains the expected old and new values")
         add("central_active_reason", "Controlled Sentinel validation edit" in _xml_field(current_root, "change_reason")
             or "Controlled Sentinel validation" in audit_text,
             "The controlled edit reason is present in the submission or Central audit evidence")
+        audit_actions = audit_text.lower()
+        add("central_active_audit_trail", bool(audits) and ("update" in audit_actions or "edit" in audit_actions),
+            "Central returned an audit-trail event for the synthetic edit")
+        add("central_active_submission_identity",
+            _xml_field(created_root, "validation_run_id") == run_id
+            and _xml_field(current_root, "validation_run_id") == run_id,
+            "The retrieved original and edited XML belong to this validation run")
         add("sentinel_active_hash_change", initial_hash != _sha(current_xml),
             "Sentinel can distinguish the original and edited XML byte hashes")
+        add("sentinel_active_evidence_capture",
+            bool(created_xml and current_xml and versions and diffs is not None and audits is not None),
+            "Raw XML, versions, diffs and audit evidence were captured for the package")
+        add("sentinel_active_synthetic_scope",
+            form_id in tuple(getattr(client.config, "validation_form_ids", ()))
+            and form_id != str(client.config.audit_form_id),
+            "Active validation is confined to a configured synthetic validation form")
     except (CentralError, ET.ParseError) as error:
         add("central_active_create", False, f"Active validation failed: {type(error).__name__}: {error}")
 

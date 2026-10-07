@@ -166,10 +166,12 @@ python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --validate-activ
 ```
 
 This creates one synthetic record in `sentinel_validation_central`, updates it
-once, and checks that Central retained the versions, field-level diff and
-action reason. Sentinel also hashes the retrieved XML before and after the
-edit. The JSON report and PDF certificate are written to the same validation
-output directory as the read-only review.
+once, and checks that Central retained structured versions, the field-level
+diff, the action reason, an audit-trail event and the validation-run identity.
+Sentinel also hashes the retrieved XML before and after the edit, confirms the
+raw evidence was captured, and confirms the exercise stayed inside the
+configured synthetic validation form. The JSON report and PDF certificate are
+written to the same validation output directory as the read-only review.
 
 The active report is also submitted to the configured audit form as a
 `validation_certificate` record, with `validation_report.json`, the PDF when

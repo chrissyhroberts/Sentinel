@@ -25,14 +25,17 @@ python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --validate-activ
 ```
 
 This uses only `sentinel_validation_central`. It creates one test submission,
-performs one controlled edit, and verifies the retained versions, Central
-diff/reason evidence and before/after XML hashes. It is safe to repeat because
-each run uses a fresh validation run ID. It is not a substitute for the
+performs one controlled edit, and verifies ten checks: creation, retained
+structured versions, edit retrieval, field-level diff, linked reason, Central
+audit-trail evidence, validation-run identity, before/after XML hashes, raw
+evidence capture and synthetic-form scope. It is safe to repeat because each
+run uses a fresh validation run ID. It is not a substitute for the
 Collect, Enketo or MethodMesh checks below.
 
-The report and certificate are also pushed into the configured audit form as
-a `validation_certificate` record, so the validation result is retained in
-the same Central evidence boundary as the ordinary Sentinel run evidence.
+The report, certificate and reproducible `evidence_package.zip` are also
+pushed into the configured audit form as a `validation_certificate` record, so
+the validation result and its raw Central evidence are retained in the same
+Central evidence boundary as the ordinary Sentinel run evidence.
 
 Detailed checklists:
 
