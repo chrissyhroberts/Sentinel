@@ -43,6 +43,7 @@ def main() -> None:
         server_audit_start=config.get("server_audit_start", ""),
         server_audit_enabled=bool(config.get("server_audit_enabled", False)),
         validation_form_ids=tuple(str(value) for value in config.get("validation_form_ids", [])),
+        datasets_enabled=bool(config.get("datasets_enabled", False)),
         admin_project_ids=tuple(str(value) for value in config.get("admin_project_ids", [])),
         admin_audit_start=str(config.get("admin_audit_start", "")),
         admin_audit_end=str(config.get("admin_audit_end", "")),

@@ -4,6 +4,7 @@ import hashlib
 import json
 import csv
 import io
+import re
 import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -172,11 +173,26 @@ class ProjectAuditor:
         for key in ("validation_report", "validation_certificate", "evidence_package"):
             if validation_fields.get(key):
                 manifest_fields[key] = validation_fields[key]
+        qa_summary_pdf = _project_qa_summary_pdf(
+            snapshot_attachments.get("project_health_snapshot.json", b""),
+            users_attachments.get("project_user_roles_snapshot.json", b""),
+            validation_attachments.get("validation_report.json", b""),
+        )
+        if qa_summary_pdf:
+            # The JSON health snapshot remains the detailed machine-readable
+            # report. The PDF on the same dedicated field is the concise
+            # manager-facing QA view.
+            manifest_fields["project_health_snapshot_pdf"] = "sentinel_qa_summary.pdf"
+            manifest_attachments.pop("project_health_snapshot.pdf", None)
+            manifest_attachments["sentinel_qa_summary.pdf"] = qa_summary_pdf
         manifest_attachments.update(snapshot_attachments)
         manifest_attachments.update(users_attachments)
         for filename in ("validation_report.json", "validation_certificate.pdf", "evidence_package.zip"):
             if filename in validation_attachments:
                 manifest_attachments[filename] = validation_attachments[filename]
+        if qa_summary_pdf:
+            manifest_attachments.pop("project_health_snapshot.pdf", None)
+            manifest_attachments["sentinel_qa_summary.pdf"] = qa_summary_pdf
         self.sink.submit(
             self.client.config.audit_form_id,
             _audit_xml(run_manifest_instance_id(self.project_id, run_id), manifest_fields,
@@ -244,20 +260,109 @@ class ProjectAuditor:
             submissions = self.client.submissions(form_id)
             dates = [str(item.get("createdAt") or item.get("created_at")) for item in submissions
                      if item.get("createdAt") or item.get("created_at")]
+            api_inventory: dict[str, Any] = {}
+            for name, getter in (
+                ("form_details", lambda: self.client.form_details(form_id)),
+                ("published_fields", lambda: self.client.form_fields(form_id)),
+                ("form_assignments", lambda: self.client.form_assignments(form_id)),
+                ("dataset_diff", lambda: self.client.form_dataset_diff(form_id)),
+                ("form_attachments", lambda: self.client.form_attachments(form_id)),
+                ("public_links", lambda: [_redact_public_link(item) for item in self.client.public_links(form_id)]),
+            ):
+                try:
+                    api_inventory[name] = {"status": "available", "value": getter()}
+                except (AttributeError, CentralError) as error:
+                    api_inventory[name] = {"status": "unavailable", "error": type(error).__name__}
+            try:
+                api_inventory["draft"] = {"status": "available", "value": self.client.form_draft(form_id)}
+            except (AttributeError, CentralError) as error:
+                api_inventory["draft"] = {
+                    "status": "not_present" if "HTTP 404" in str(error) else "unavailable",
+                    "error": type(error).__name__,
+                }
+            if api_inventory["draft"]["status"] == "available":
+                try:
+                    api_inventory["draft_fields"] = {
+                        "status": "available", "value": self.client.form_fields(form_id, draft=True)
+                    }
+                except (AttributeError, CentralError) as error:
+                    api_inventory["draft_fields"] = {"status": "unavailable", "error": type(error).__name__}
+                try:
+                    draft_xml = self.client.form_draft_xml(form_id)
+                    api_inventory["draft_xml"] = {
+                        "status": "available", "sha256": _sha(draft_xml), "size": len(draft_xml)
+                    }
+                except (AttributeError, CentralError) as error:
+                    api_inventory["draft_xml"] = {"status": "unavailable", "error": type(error).__name__}
+                try:
+                    api_inventory["draft_attachments"] = {
+                        "status": "available", "value": self.client.form_attachments(form_id, draft=True)
+                    }
+                except (AttributeError, CentralError) as error:
+                    api_inventory["draft_attachments"] = {
+                        "status": "unavailable", "error": type(error).__name__
+                    }
+            published_version_inventory = []
+            for version in versions:
+                version_id = str(version.get("version") or version.get("id") or "")
+                if not version_id:
+                    continue
+                observation: dict[str, Any] = {"version": version_id}
+                for key, getter in (
+                    ("metadata", lambda: self.client.form_version_details(form_id, version_id)),
+                    ("attachments", lambda: self.client.form_version_attachments(form_id, version_id)),
+                    ("fields", lambda: self.client.form_version_fields(form_id, version_id)),
+                ):
+                    try:
+                        value = getter()
+                        observation[key] = value if key != "fields" else {
+                            "count": len(value), "fields": value
+                        }
+                    except (AttributeError, CentralError) as error:
+                        observation[key] = {"status": "unavailable", "error": type(error).__name__}
+                published_version_inventory.append(observation)
+            api_inventory["published_version_inventory"] = {
+                "status": "available", "value": published_version_inventory
+            }
+            version_summary = []
+            for version in versions:
+                version_summary.append({
+                    key: version.get(key)
+                    for key in ("version", "id", "createdAt", "updatedAt", "publishedAt", "deletedAt")
+                    if version.get(key) is not None
+                })
             forms.append({
                 "form_id": form_id,
+                "form_name": form.get("name") or form.get("title") or form_id,
                 "form_state": form.get("state", ""),
+                "created_by": form.get("createdBy", form.get("created_by", "")),
+                "review_states": form.get("reviewStates", form.get("review_states", {})),
+                "central_last_submission": form.get("lastSubmission", form.get("last_submission", "")),
                 "published_versions": len(versions),
+                "versions": version_summary,
                 "submissions": len(submissions),
                 "retained_versions": retained_versions_by_form.get(form_id, 0),
                 "latest_submission_at": max(dates) if dates else "",
+                "api_inventory": api_inventory,
             })
+        project_summary = {
+            "project_id": self.project_id,
+            "project_name": project_metadata.get("name", ""),
+            "source_forms": len(forms),
+            "published_form_versions": sum(item["published_versions"] for item in forms),
+            "submissions": sum(item["submissions"] for item in forms),
+            "retained_submission_versions": sum(item["retained_versions"] for item in forms),
+            "planned_source_records": len(plan.tasks),
+        }
         snapshot = {
-            "schema": "methodmesh.sentinel.project_health_snapshot.v1",
+            "schema": "methodmesh.sentinel.project_health_snapshot.v2",
+            "report_title": "Sentinel project QA snapshot",
+            "report_type": "regular_project_platform_report",
             "project_id": self.project_id,
             "run_id": run_id,
             "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "project_api_status": project_status,
+            "summary": project_summary,
             "project_metadata": {
                 key: project_metadata.get(key)
                 for key in ("id", "name", "createdAt", "updatedAt", "archived")
@@ -269,9 +374,25 @@ class ProjectAuditor:
             "source_form_count": len(forms),
             "planned_source_records": len(plan.tasks),
             "server_audit_enabled": bool(getattr(self.client.config, "server_audit_enabled", False)),
+            "actor_properties": self._safe_project_read(
+                "actor_properties", lambda: self.client.actor_properties(self.project_id)
+            ),
+            "datasets": (
+                self._safe_project_read("datasets", lambda: self._dataset_inventory())
+                if getattr(self.client.config, "datasets_enabled", False)
+                else {
+                    "status": "out_of_scope",
+                    "note": "Datasets and Entities are not used by this study validation scope.",
+                }
+            ),
+            "limitations": [
+                "This regular project report uses data visible to the configured non-admin account.",
+                "Server uptime, disk space, and login history require the separate admin run.",
+                "Current project users and roles are attached separately as project_user_roles_snapshot.json and PDF.",
+            ],
         }
         snapshot_bytes = (json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
-        snapshot_pdf = _json_document_pdf(snapshot, "Sentinel project health snapshot")
+        snapshot_pdf = _json_document_pdf(snapshot, "Sentinel project QA snapshot")
         audit_id = audit_instance_id(self.project_id, "project-health", run_id, run_id)
         fields = {
             "record_type": "project_health_snapshot",
@@ -319,6 +440,27 @@ class ProjectAuditor:
             )
         return fields, snapshot_attachments
 
+    @staticmethod
+    def _safe_project_read(name: str, getter) -> dict[str, Any]:
+        try:
+            return {"status": "available", "value": getter()}
+        except (AttributeError, CentralError) as error:
+            return {"status": "unavailable", "error": type(error).__name__, "name": name}
+
+    def _dataset_inventory(self) -> dict[str, Any]:
+        datasets = self.client.datasets()
+        result = []
+        for dataset in datasets:
+            name = str(dataset.get("name") or dataset.get("id") or "")
+            item = dict(dataset)
+            if name:
+                try:
+                    item["entity_metadata_count"] = len(self.client.dataset_entities(name))
+                except (AttributeError, CentralError):
+                    item["entity_metadata_count"] = None
+            result.append(item)
+        return {"published": result, "deleted": self.client.datasets(deleted=True)}
+
     def _submit_user_roles_snapshot(self, run_id: str, *, submit: bool = True):
         inventory = self._project_user_inventory()
         snapshot = {
@@ -330,7 +472,7 @@ class ProjectAuditor:
             "safety": "Project-visible user and role metadata only; no source data copied.",
         }
         snapshot_bytes = (json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
-        snapshot_pdf = _json_document_pdf(snapshot, "Sentinel project user and role snapshot")
+        snapshot_pdf = _user_roles_snapshot_pdf(snapshot_bytes)
         audit_id = audit_instance_id(self.project_id, "project-users", run_id, run_id)
         fields = {
             "record_type": "project_user_roles_snapshot",
@@ -383,6 +525,7 @@ class ProjectAuditor:
         inventory: dict[str, Any] = {
             "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "project_id": self.project_id,
+            "authenticated_account_email": str(getattr(self.client, "authenticated_email", "") or ""),
             "web_users": {"status": "unavailable", "items": []},
             "app_users": {"status": "unavailable", "items": []},
             "roles": {"status": "unavailable", "items": []},
@@ -458,6 +601,7 @@ class ProjectAuditor:
                     "created_at": source.get("createdAt") or member["created_at"],
                     "updated_at": source.get("updatedAt") or member["updated_at"],
                     "deleted_at": source.get("deletedAt") or member["deleted_at"],
+                    "last_login": source.get("lastLoginAt") or source.get("last_login") or member["last_login"],
                 })
                 if role_key not in member["roles"]:
                     member["roles"].append(role_key)
@@ -579,8 +723,21 @@ class ProjectAuditor:
         }
         fields["sentinel_run_id"] = run_id
         form_version = getattr(self.client.config, "audit_form_version", "1")
+        attachments: dict[str, bytes] = {}
+        if _audit_form_supports_form_definition_attachments(form_version):
+            fields["source_form_definition_xml"] = "source_form_definition.xml"
+            attachments["source_form_definition.xml"] = xml
+            try:
+                xlsx = self.client.form_version_bytes(form_id, version_id, "xlsx")
+            except CentralError:
+                xlsx = b""
+                if getattr(self.client, "debug", False):
+                    print(f"[debug] XLSX unavailable for {form_id}/{version_id}; XML retained")
+            if xlsx:
+                fields["source_form_definition_xlsx"] = "source_form_definition.xlsx"
+                attachments["source_form_definition.xlsx"] = xlsx
         self.sink.submit(self.client.config.audit_form_id, _audit_xml(
-            audit_id, fields, form_version, self.client.config.audit_form_id), {})
+            audit_id, fields, form_version, self.client.config.audit_form_id), attachments)
         return fields
 
     def _existing_audit_ids(self) -> set[str]:
@@ -663,7 +820,15 @@ class ProjectAuditor:
         resolver = getattr(self.client, "actor_email", None)
         if resolver is None:
             return ""
-        return str(resolver(actor_id) or "")
+        try:
+            return str(resolver(actor_id) or "")
+        except CentralError:
+            # Central may expose an actor ID in submission metadata while
+            # denying a regular project account access to /v1/users/{id}.
+            # Email enrichment is optional; never lose the audit record.
+            if getattr(self.client, "debug", False):
+                print(f"[debug] actor email unavailable for {actor_id}; retaining actor ID")
+            return ""
 
     def _submit_checkpoint(self, *, forms_seen: int, versions_seen: int, run_id: str) -> None:
         audit_id = checkpoint_instance_id(self.project_id)
@@ -861,7 +1026,7 @@ class ProjectAuditor:
             },
         }
         certificate_bytes = (json.dumps(certificate, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
-        certificate_pdf = _json_document_pdf(certificate, "Sentinel validation certificate")
+        certificate_pdf = _validation_certificate_pdf(certificate)
         audit_id = run_manifest_instance_id(self.project_id, run_id)
         fields = {
             "record_type": "sentinel_run_qa_snapshot",
@@ -973,8 +1138,9 @@ def _xml_safe(value: Any) -> str:
 def _json_document_pdf(document: dict[str, Any], title: str) -> bytes:
     """Render a compact human-readable PDF companion for a JSON evidence file."""
     try:
+        from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import mm
         from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
     except ModuleNotFoundError:
@@ -983,16 +1149,22 @@ def _json_document_pdf(document: dict[str, Any], title: str) -> bytes:
 
     buffer = BytesIO()
     styles = getSampleStyleSheet()
-    body = styles["BodyText"]
-    body.fontName = "Helvetica"
-    body.fontSize = 8
-    body.leading = 10
-    story: list[Any] = [Paragraph(title, styles["Title"]), Spacer(1, 6 * mm)]
+    body = ParagraphStyle("EvidenceBody", parent=styles["BodyText"], fontName="Helvetica",
+                          fontSize=8, leading=10, textColor=colors.HexColor("#263238"))
+    section = ParagraphStyle("EvidenceSection", parent=body, fontName="Helvetica-Bold",
+                             fontSize=9, leading=11, textColor=colors.HexColor("#17324D"),
+                             spaceBefore=3 * mm, spaceAfter=1 * mm)
+    title_style = ParagraphStyle("EvidenceTitle", parent=styles["Title"], fontName="Helvetica-Bold",
+                                 fontSize=17, leading=21, textColor=colors.HexColor("#17324D"))
+    story: list[Any] = [Paragraph(escape(title), title_style),
+                        Paragraph("Human-readable companion to the authoritative JSON evidence.",
+                                  ParagraphStyle("EvidenceIntro", parent=body, textColor=colors.HexColor("#5B6770"))),
+                        Spacer(1, 4 * mm)]
 
     def add_value(key: str, value: Any, level: int = 0) -> None:
         indent = "&nbsp;" * (level * 5)
         if isinstance(value, dict):
-            story.append(Paragraph(f"{indent}<b>{escape(str(key))}</b>", body))
+            story.append(Paragraph(f"{indent}{escape(str(key))}", section if level == 0 else body))
             for child_key, child_value in value.items():
                 add_value(str(child_key), child_value, level + 1)
         elif isinstance(value, list):
@@ -1006,9 +1178,414 @@ def _json_document_pdf(document: dict[str, Any], title: str) -> bytes:
 
     for key, value in document.items():
         add_value(str(key), value)
-    SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
-                      topMargin=15 * mm, bottomMargin=15 * mm).build(story)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
+                            topMargin=15 * mm, bottomMargin=15 * mm)
+    def footer(canvas: Any, _document: Any) -> None:
+        canvas.saveState()
+        canvas.setStrokeColor(colors.HexColor("#D7DEE3"))
+        canvas.line(15 * mm, 11 * mm, 195 * mm, 11 * mm)
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#5B6770"))
+        canvas.drawString(15 * mm, 7 * mm, "Sentinel evidence companion")
+        canvas.drawRightString(195 * mm, 7 * mm, f"Page {canvas.getPageNumber()}")
+        canvas.restoreState()
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buffer.getvalue()
+
+
+def _audit_form_supports_form_definition_attachments(version: Any) -> bool:
+    """Use the dedicated source-form fields only in audit form v6+."""
+    match = re.match(r"^(\d+)", str(version or ""))
+    return bool(match and int(match.group(1)) >= 6)
+
+
+def _validation_certificate_pdf(certificate: dict[str, Any]) -> bytes:
+    """Render the standard-run certificate as a concise review document."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ModuleNotFoundError:
+        return b""
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("RunCertificateTitle", parent=styles["Title"], fontName="Helvetica-Bold",
+                           fontSize=19, leading=23, textColor=colors.HexColor("#17324D"))
+    heading = ParagraphStyle("RunCertificateHeading", parent=styles["Heading2"], fontName="Helvetica-Bold",
+                             fontSize=11, leading=14, textColor=colors.HexColor("#17324D"), spaceBefore=7)
+    body = ParagraphStyle("RunCertificateBody", parent=styles["BodyText"], fontName="Helvetica",
+                          fontSize=8.5, leading=11, textColor=colors.HexColor("#222222"))
+    small = ParagraphStyle("RunCertificateSmall", parent=body, fontSize=7.2, leading=9)
+    status = str(certificate.get("status", "unknown"))
+    status_label = "PASS" if status == "passed" else "PASS WITH WARNINGS" if status == "passed_with_warnings" else "ACTION REQUIRED"
+    status_color = colors.HexColor("#19733A") if status == "passed" else colors.HexColor("#B06A00") if status == "passed_with_warnings" else colors.HexColor("#A12828")
+    summary = certificate.get("summary", {})
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=12 * mm,
+                            leftMargin=12 * mm, topMargin=12 * mm, bottomMargin=12 * mm)
+    story: list[Any] = [
+        Paragraph("Sentinel run validation certificate", title),
+        Spacer(1, 2 * mm),
+        Paragraph(f"Project: <b>{certificate.get('project_id', '')}</b> &nbsp;&nbsp; "
+                  f"Run: <b>{certificate.get('validation_run_id', '—')}</b> &nbsp;&nbsp; "
+                  f"Generated: {certificate.get('created_at', '—')}", body),
+        Spacer(1, 3 * mm),
+    ]
+    status_table = Table([[Paragraph(f"<font color='{status_color.hexval()}'><b>{status_label}</b></font>",
+                                     ParagraphStyle("RunStatus", parent=body, fontSize=14, leading=17)),
+                           Paragraph(f"<b>{summary.get('forms', 0)}</b> source form(s) &nbsp; "
+                                     f"<b>{summary.get('planned_records', 0)}</b> planned record(s) &nbsp; "
+                                     f"<b>{summary.get('submitted', 0)}</b> new &nbsp; "
+                                     f"<b>{summary.get('already_present', 0)}</b> already archived", body)]],
+                         colWidths=[48 * mm, 150 * mm])
+    status_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#EEF6F0") if status == "passed" else colors.HexColor("#FCE8E6")),
+        ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#F6F8FA")),
+        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#A8B5C2")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7), ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    story += [status_table,
+              Paragraph("What this certificate covers", heading),
+              Paragraph("This is the human-readable summary of one Sentinel reconciliation run. "
+                        "The timestamp manifest and retained Central audit records are the underlying evidence. "
+                        "The JSON certificate remains authoritative.", body),
+              Paragraph("Run checks and evidence", heading)]
+    rows = [[Paragraph("Check", small), Paragraph("Result", small), Paragraph("Evidence", small), Paragraph("Finding", small)]]
+    for check in certificate.get("checks", []):
+        result = str(check.get("status", "")).upper()
+        color = "#19733A" if result == "PASS" else "#B06A00" if result == "WARNING" else "#A12828"
+        name = str(check.get("name") or check.get("check_id") or "").replace("_", " ").capitalize()
+        evidence = "timestamp_manifest.json" if check.get("name") in {"manifest_chain", "run_manifest_timestamp"} else "validation_report.json"
+        if check.get("name") == "run_manifest_timestamp":
+            evidence += " / timestamp_token.tsr"
+        rows.append([Paragraph(name, small), Paragraph(f'<font color="{color}"><b>{result}</b></font>', small),
+                     Paragraph(evidence, small), Paragraph(str(check.get("detail", "")), small)])
+    table = LongTable(rows, repeatRows=1, colWidths=[55 * mm, 22 * mm, 67 * mm, 127 * mm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DCE6F0")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#17324D")),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#A8B5C2")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F6F8FA")]),
+    ]))
+    story.append(table)
+    report_hash = _sha(json.dumps(certificate, sort_keys=True, ensure_ascii=False).encode())
+    def footer(canvas: Any, _document: Any) -> None:
+        canvas.saveState()
+        canvas.setStrokeColor(colors.HexColor("#D7DEE3"))
+        canvas.line(12 * mm, 8 * mm, 285 * mm, 8 * mm)
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#5B6770"))
+        canvas.drawString(12 * mm, 4 * mm, f"Certificate JSON SHA-256: {report_hash}")
+        canvas.drawRightString(285 * mm, 4 * mm, f"Page {canvas.getPageNumber()} · JSON remains authoritative")
+        canvas.restoreState()
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return buffer.getvalue()
+
+
+def _user_roles_snapshot_pdf(snapshot_bytes: bytes) -> bytes:
+    """Render a concise human-readable project user and role report."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ModuleNotFoundError:
+        return b""
+    try:
+        snapshot = json.loads(snapshot_bytes or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return b""
+    inventory = snapshot.get("inventory", {}) if isinstance(snapshot, dict) else {}
+    users = inventory.get("current_project_users", []) if isinstance(inventory, dict) else []
+    roles = inventory.get("roles", {}) if isinstance(inventory, dict) else {}
+    role_items = roles.get("items", []) if isinstance(roles, dict) else []
+    web_users = inventory.get("web_users", {}) if isinstance(inventory, dict) else {}
+    app_users = inventory.get("app_users", {}) if isinstance(inventory, dict) else {}
+
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("RolesTitle", parent=styles["Title"], fontName="Helvetica-Bold",
+                           fontSize=18, leading=22, textColor=colors.HexColor("#17324D"))
+    heading = ParagraphStyle("RolesHeading", parent=styles["Heading2"], fontName="Helvetica-Bold",
+                             fontSize=11, leading=14, textColor=colors.HexColor("#17324D"), spaceBefore=7)
+    body = ParagraphStyle("RolesBody", parent=styles["BodyText"], fontName="Helvetica",
+                          fontSize=8.5, leading=11, textColor=colors.HexColor("#222222"))
+    small = ParagraphStyle("RolesSmall", parent=body, fontSize=7.3, leading=9)
+    p = lambda value, style=body: Paragraph("—" if value in (None, "") else str(value), style)
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
+                            topMargin=14 * mm, bottomMargin=15 * mm)
+    story: list[Any] = [
+        Paragraph("Sentinel project user and role report", title),
+        Paragraph("Human-readable governance view; the accompanying JSON remains authoritative.",
+                  ParagraphStyle("RolesIntro", parent=body, textColor=colors.HexColor("#5B6770"))),
+        Spacer(1, 4 * mm),
+    ]
+    overview = Table([
+        [p("Project", small), p(snapshot.get("project_id"), small),
+         p("Observed", small), p(snapshot.get("observed_at"), small)],
+        [p("Sentinel run", small), p(snapshot.get("run_id"), small),
+         p("Current users", small), p(len(users), small)],
+    ], colWidths=[27 * mm, 63 * mm, 27 * mm, 63 * mm])
+    overview.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#EAF0F5")),
+        ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#EAF0F5")),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#C5D0D8")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story += [overview, Paragraph("Current project users", heading)]
+    user_rows = [[p("Account", small), p("Actor ID", small), p("Email", small), p("Privilege / roles", small),
+                  p("Last login", small), p("Last used", small)]]
+    for user in users:
+        user_rows.append([
+            p(user.get("display_name") or user.get("actor_id"), small),
+            p(user.get("actor_id"), small),
+            p(user.get("email"), small),
+            p(", ".join(str(value) for value in user.get("roles", [])), small),
+            p(user.get("last_login"), small),
+            p(user.get("last_used"), small),
+        ])
+    if len(user_rows) == 1:
+        user_rows.append([p("No current project users returned", small), p("", small), p("", small), p("", small), p("", small), p("", small)])
+    user_table = LongTable(user_rows, colWidths=[36 * mm, 22 * mm, 38 * mm, 39 * mm, 29 * mm, 24 * mm], repeatRows=1)
+    user_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2F0D9")),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#C5D0D8")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(user_table)
+    story += [Paragraph("Account identifiers and lifecycle", heading)]
+    lifecycle_rows = [[p("Account", small), p("Type", small), p("Created", small),
+                       p("Updated", small), p("Deleted", small)]]
+    for user in users:
+        lifecycle_rows.append([
+            p(user.get("display_name") or user.get("actor_id"), small),
+            p(user.get("actor_type"), small),
+            p(user.get("created_at"), small),
+            p(user.get("updated_at"), small),
+            p(user.get("deleted_at"), small),
+        ])
+    if len(lifecycle_rows) == 1:
+        lifecycle_rows.append([p("No lifecycle records returned", small), p("", small), p("", small), p("", small), p("", small)])
+    lifecycle_table = LongTable(lifecycle_rows, colWidths=[47 * mm, 30 * mm, 40 * mm, 40 * mm, 32 * mm], repeatRows=1)
+    lifecycle_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FCE4D6")),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#C5D0D8")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    story.append(lifecycle_table)
+    story += [Paragraph("Role catalogue visible to the account", heading),
+              Paragraph("These are Central role definitions returned by the configured account; they are not all necessarily assigned to this project.", body)]
+    role_rows = [[p("Role", small), p("System name", small), p("Permissions", small)]]
+    for role in role_items:
+        verbs = role.get("verbs", []) if isinstance(role, dict) else []
+        role_rows.append([p(role.get("name"), small), p(role.get("system"), small), p(len(verbs), small)])
+    if len(role_rows) == 1:
+        role_rows.append([p("No role catalogue returned", small), p("", small), p("", small)])
+    role_table = LongTable(role_rows, colWidths=[92 * mm, 45 * mm, 42 * mm], repeatRows=1)
+    role_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E2F3")),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#C5D0D8")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    story.append(role_table)
+    story += [Paragraph("API visibility notes", heading),
+              Paragraph(f"Authenticated account: {inventory.get('authenticated_account_email') or 'not recorded'}; "
+                        f"Web users: {web_users.get('status', 'unknown')}; "
+                        f"app users: {app_users.get('status', 'unknown')}; "
+                        "missing email or login values are reported as unavailable rather than inferred.", body)]
+    report_hash = _sha(snapshot_bytes)
+    def footer(canvas: Any, _document: Any) -> None:
+        canvas.saveState()
+        canvas.setStrokeColor(colors.HexColor("#D7DEE3"))
+        canvas.line(15 * mm, 11 * mm, 195 * mm, 11 * mm)
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#5B6770"))
+        canvas.drawString(15 * mm, 7 * mm, f"Roles JSON SHA-256: {report_hash}")
+        canvas.drawRightString(195 * mm, 7 * mm, f"Page {canvas.getPageNumber()} · JSON remains authoritative")
+        canvas.restoreState()
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return buffer.getvalue()
+
+
+def _project_qa_summary_pdf(health_bytes: bytes, users_bytes: bytes, validation_bytes: bytes) -> bytes:
+    """Render the manager-facing QA summary for the consolidated run row."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer, LongTable,
+                                        Table, TableStyle, PageBreak)
+    except ModuleNotFoundError:
+        return b""
+    try:
+        health = json.loads(health_bytes or b"{}")
+        users = json.loads(users_bytes or b"{}")
+        validation = json.loads(validation_bytes or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return b""
+
+    inventory = users.get("inventory", {}) if isinstance(users, dict) else {}
+    current_users = inventory.get("current_project_users", []) if isinstance(inventory, dict) else []
+    forms = health.get("source_forms", []) if isinstance(health, dict) else []
+    checks = validation.get("checks", []) if isinstance(validation, dict) else []
+    actions = [check for check in checks if check.get("status") == "fail"]
+    reviews = [check for check in checks if check.get("status") == "warning"]
+    validation_status = str(validation.get("status", "unknown"))
+    api_status = str(health.get("project_api_status", "unknown"))
+    overall = "ACTION REQUIRED" if actions or api_status not in {"available", "unknown"} else (
+        "REVIEW RECOMMENDED" if reviews else "PASS")
+    project_metadata = health.get("project_metadata", {})
+    summary = health.get("summary", {})
+
+    def p(value: Any, style) -> Any:
+        return Paragraph("" if value is None else str(value), style)
+
+    buffer = io.BytesIO()
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("QATitle", parent=styles["Title"], alignment=TA_CENTER, fontSize=19, leading=23)
+    heading = ParagraphStyle("QAHeading", parent=styles["Heading2"], spaceBefore=7 * mm, spaceAfter=2 * mm)
+    body = ParagraphStyle("QABody", parent=styles["BodyText"], fontSize=8, leading=10)
+    small = ParagraphStyle("QASmall", parent=body, fontSize=7, leading=8)
+    status_style = ParagraphStyle("QAStatus", parent=styles["Heading2"], alignment=TA_CENTER,
+                                  textColor=(colors.red if actions or api_status not in {"available", "unknown"}
+                                             else colors.HexColor("#B06A00") if reviews else colors.green))
+    story: list[Any] = [
+        Paragraph("Sentinel QA summary", title),
+        Spacer(1, 2 * mm),
+        Paragraph(overall, status_style),
+        Spacer(1, 2 * mm),
+    ]
+
+    project_rows = [
+        [p("Project", body), p(project_metadata.get("name") or health.get("project_id", ""), body)],
+        [p("Project ID", body), p(health.get("project_id", ""), body)],
+        [p("Observed", body), p(health.get("observed_at", ""), body)],
+        [p("Sentinel run", body), p(health.get("run_id", ""), body)],
+        [p("Central API", body), p(health.get("project_api_status", "unknown"), body)],
+        [p("Validation", body), p(validation_status, body)],
+        [p("Source forms / links", body), p(f"{len(forms)} / {sum(_public_link_count(form) for form in forms)}", body)],
+        [p("Project users", body), p(len(current_users), body)],
+    ]
+    project_table = Table(project_rows, colWidths=[35 * mm, 145 * mm])
+    project_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#eeeeee")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cccccc")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story += [Paragraph("At a glance", heading), project_table]
+
+    form_rows = [[p("Form", small), p("State", small), p("Published versions", small),
+                  p("Submissions", small), p("Latest submission", small)]]
+    for form in forms:
+        form_rows.append([
+            p(f"{form.get('form_name') or form.get('form_id', '')} ({form.get('form_id', '')})", small),
+            p(form.get("form_state", ""), small),
+            p(form.get("published_versions", 0), small),
+            p(form.get("submissions", 0), small),
+            p(form.get("latest_submission_at", "") or "—", small),
+        ])
+    if len(form_rows) == 1:
+        form_rows.append([p("No source forms observed", small), p("—", small), p("—", small), p("—", small), p("—", small)])
+    form_table = LongTable(form_rows, colWidths=[67 * mm, 23 * mm, 28 * mm, 23 * mm, 39 * mm], repeatRows=1)
+    form_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d9e2f3")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cccccc")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    story += [Paragraph("Study progress", heading),
+              Paragraph(
+                  f"{summary.get('source_forms', len(forms))} source form(s); "
+                  f"{summary.get('submissions', 0)} current submission(s); "
+                  f"{summary.get('retained_submission_versions', 0)} retained submission version(s).",
+                  body), form_table]
+
+    user_rows = [[p("User", small), p("Email", small), p("Privilege / roles", small),
+                  p("Last login", small), p("Last used", small)]]
+    for user in current_users:
+        user_rows.append([
+            p(user.get("display_name") or user.get("actor_id", ""), small),
+            p(user.get("email", "") or "—", small),
+            p(", ".join(user.get("roles", [])) or "—", small),
+            p(user.get("last_login") or "—", small),
+            p(user.get("last_used") or "—", small),
+        ])
+    if len(user_rows) == 1:
+        user_rows.append([p("No project users returned", small), p("—", small), p("—", small), p("—", small), p("—", small)])
+    user_table = LongTable(user_rows, colWidths=[40 * mm, 44 * mm, 42 * mm, 29 * mm, 25 * mm], repeatRows=1)
+    user_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e2f0d9")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cccccc")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    story += [Paragraph("Governance: current project users", heading), user_table]
+
+    story.append(Paragraph("Checks and actions", heading))
+    if actions:
+        action_rows = [[p("Status", small), p("Check", small), p("Action / detail", small)]]
+        for check in actions:
+            action_rows.append([p(str(check.get("status", "")).upper(), small),
+                                p(check.get("check_id") or check.get("name", ""), small),
+                                p(check.get("detail", "Review this check and its evidence."), small)])
+        action_table = LongTable(action_rows, colWidths=[25 * mm, 50 * mm, 105 * mm], repeatRows=1)
+        action_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f4cccc")),
+            ("TEXTCOLOR", (0, 1), (0, -1), colors.red),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cccccc")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(action_table)
+    else:
+        story.append(Paragraph("All automated checks passed. No immediate action is indicated.", body))
+    if reviews:
+        story.append(Paragraph("Review recommended", heading))
+        story.append(Paragraph("; ".join(str(check.get("detail", "")) for check in reviews), body))
+
+    limitations = health.get("limitations", [])
+    story += [Paragraph("Scope notes", heading)]
+    story.append(Paragraph(" ".join(str(item) for item in limitations) or
+                           "The report reflects the configured account's Central visibility.", body))
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
+                            topMargin=13 * mm, bottomMargin=15 * mm)
+    def footer(canvas: Any, _document: Any) -> None:
+        canvas.saveState()
+        canvas.setStrokeColor(colors.HexColor("#D7DEE3"))
+        canvas.line(15 * mm, 11 * mm, 195 * mm, 11 * mm)
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#5B6770"))
+        canvas.drawString(15 * mm, 7 * mm, "Sentinel QA summary · JSON attachments remain authoritative")
+        canvas.drawRightString(195 * mm, 7 * mm, f"Page {canvas.getPageNumber()}")
+        canvas.restoreState()
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return buffer.getvalue()
+
+
+def _public_link_count(form: dict[str, Any]) -> int:
+    """Count visible public links without exposing their tokens in the PDF."""
+    inventory = form.get("api_inventory", {}) if isinstance(form, dict) else {}
+    links = inventory.get("public_links", {}) if isinstance(inventory, dict) else {}
+    values = links.get("value", []) if isinstance(links, dict) else []
+    return len(values) if isinstance(values, list) else 0
 
 
 def _sha(value: bytes) -> str:
@@ -1019,10 +1596,26 @@ def _sha_json(value: Any) -> str:
     return _sha(json.dumps(value, sort_keys=True, ensure_ascii=False).encode())
 
 
+def _redact_public_link(value: dict[str, Any]) -> dict[str, Any]:
+    """Retain public-link state without retaining a usable access token."""
+    return {key: item for key, item in value.items() if key not in {"token", "secret"}}
+
+
 def _central_action_is_relevant(action: str) -> bool:
     return action.startswith(("project.", "form.", "submission.")) or action in {
         "user.create", "user.update", "user.delete", "user.session.create",
-        "field_key.session.end", "public_link.session.end",
+        "user.assignment.create", "user.assignment.delete",
+        "user.preference.update", "user.preference.delete",
+        "field_key.create", "field_key.assignment.create", "field_key.assignment.delete",
+        "field_key.session.end", "field_key.delete", "field_key.property.set",
+        "public_link.create", "public_link.assignment.create", "public_link.assignment.delete",
+        "public_link.session.end", "public_link.delete", "public_link.property.set",
+        "actor_property.create", "dataset.create", "dataset.update", "dataset.update.publish",
+        "dataset.delete", "dataset.update.property.delete", "entity.create", "entity.error",
+        "entity.update.version", "entity.update.resolve", "entity.delete", "entity.restore",
+        "entity.purge", "entity.bulk.delete", "submission.attachment.update",
+        "submission.purge", "submission.restore", "submission.backlog.hold",
+        "submission.backlog.reprocess", "submission.backlog.force", "form.submissions.export",
     }
 
 

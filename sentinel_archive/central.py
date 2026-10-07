@@ -29,6 +29,7 @@ class CentralConfig:
     server_audit_start: str = ""
     server_audit_enabled: bool = False
     validation_form_ids: tuple[str, ...] = ()
+    datasets_enabled: bool = False
     admin_project_ids: tuple[str, ...] = ()
     admin_audit_start: str = ""
     admin_audit_end: str = ""
@@ -44,6 +45,7 @@ class CentralClient:
         self.token = token or os.environ.get(config.token_env)
         self.base_url = config.base_url.rstrip("/")
         self.debug = debug
+        self.authenticated_email = ""
         self._user_cache: dict[str, dict[str, Any] | None] = {}
 
     @classmethod
@@ -56,7 +58,9 @@ class CentralClient:
         token = response.get("token") if isinstance(response, dict) else None
         if not token:
             raise CentralError("Central login did not return a session token")
-        return cls(config, token=str(token), debug=debug)
+        authenticated = cls(config, token=str(token), debug=debug)
+        authenticated.authenticated_email = email
+        return authenticated
 
     def get_json(self, path: str) -> Any:
         return self._request("GET", path, accept="application/json")
@@ -111,7 +115,24 @@ class CentralClient:
 
     def forms(self, *, deleted: bool = False) -> list[dict[str, Any]]:
         suffix = "?deleted=true" if deleted else ""
-        return _items(self.get_json(f"/v1/projects/{_quote(self.config.project_id)}/forms{suffix}"))
+        return _items(self._request(
+            "GET", f"/v1/projects/{_quote(self.config.project_id)}/forms{suffix}",
+            accept="application/json", extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def create_form(self, form_xml: bytes, *, publish: bool = False) -> dict[str, Any]:
+        """Create a form from XForms XML, normally for synthetic validation."""
+        suffix = "?publish=true" if publish else ""
+        return dict(self._request(
+            "POST", f"/v1/projects/{_quote(self.config.project_id)}/forms{suffix}",
+            accept="application/json", raw_body=form_xml, content_type="application/xml",
+        ))
+
+    def delete_form(self, form_id: str) -> dict[str, Any]:
+        """Move a form to Central Trash."""
+        return dict(self._request(
+            "DELETE", self._form_path(form_id), accept="application/json",
+        ))
 
     def project(self) -> dict[str, Any]:
         value = self._request(
@@ -173,6 +194,99 @@ class CentralClient:
             extra_headers={"X-Extended-Metadata": "true"},
         ))
 
+    def actor_properties(self, project_id: str) -> list[dict[str, Any]]:
+        path = f"/v1/projects/{_quote(project_id)}/actor-properties"
+        return _items(self._request(
+            "GET", path, accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def form_details(self, form_id: str) -> dict[str, Any]:
+        return dict(self._request(
+            "GET", self._form_path(form_id), accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def form_draft(self, form_id: str) -> dict[str, Any]:
+        return dict(self._request(
+            "GET", self._form_path(form_id) + "/draft", accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def form_xml(self, form_id: str) -> bytes:
+        return self.get_bytes(self._form_path(form_id) + ".xml")
+
+    def form_attachments(self, form_id: str, *, draft: bool = False) -> list[dict[str, Any]]:
+        suffix = "/draft/attachments" if draft else "/attachments"
+        return _items(self.get_json(self._form_path(form_id) + suffix))
+
+    def form_attachment_bytes(self, form_id: str, filename: str, *, draft: bool = False) -> bytes:
+        suffix = "/draft/attachments" if draft else "/attachments"
+        return self.get_bytes(self._form_path(form_id) + f"{suffix}/{_quote(filename)}")
+
+    def form_draft_xml(self, form_id: str) -> bytes:
+        return self.get_bytes(self._form_path(form_id) + "/draft.xml")
+
+    def form_fields(self, form_id: str, *, draft: bool = False) -> list[dict[str, Any]]:
+        suffix = "/draft/fields" if draft else "/fields"
+        return _items(self.get_json(self._form_path(form_id) + suffix))
+
+    def form_version_details(self, form_id: str, version: str) -> dict[str, Any]:
+        return dict(self._request(
+            "GET", self._form_path(form_id) + f"/versions/{_quote(version)}",
+            accept="application/json", extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def form_version_attachments(self, form_id: str, version: str) -> list[dict[str, Any]]:
+        return _items(self.get_json(
+            self._form_path(form_id) + f"/versions/{_quote(version)}/attachments"
+        ))
+
+    def form_version_fields(self, form_id: str, version: str) -> list[dict[str, Any]]:
+        return _items(self.get_json(
+            self._form_path(form_id) + f"/versions/{_quote(version)}/fields"
+        ))
+
+    def public_links(self, form_id: str) -> list[dict[str, Any]]:
+        return _items(self._request(
+            "GET", self._form_path(form_id) + "/public-links", accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def datasets(self, *, deleted: bool = False) -> list[dict[str, Any]]:
+        suffix = "?deleted=true" if deleted else ""
+        return _items(self._request(
+            "GET", f"/v1/projects/{_quote(self.config.project_id)}/datasets{suffix}",
+            accept="application/json", extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def dataset_entities(self, dataset_name: str, *, deleted: bool = False) -> list[dict[str, Any]]:
+        suffix = "?deleted=true" if deleted else ""
+        path = (f"/v1/projects/{_quote(self.config.project_id)}/datasets/"
+                f"{_quote(dataset_name)}/entities{suffix}")
+        return _items(self._request(
+            "GET", path, accept="application/json", extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def submission_export(self, form_id: str, *, attachments: bool = False) -> bytes:
+        query = "?attachments=true" if attachments else "?attachments=false"
+        return self.get_bytes(self._form_path(form_id) + "/submissions.csv.zip" + query)
+
+    def submission_keys(self, form_id: str) -> list[dict[str, Any]]:
+        return _items(self.get_json(self._form_path(form_id) + "/submissions/keys"))
+
+    def logout(self) -> None:
+        self._request("DELETE", "/v1/sessions/current", accept="application/json")
+
+    def form_assignments(self, form_id: str) -> list[dict[str, Any]]:
+        return _items(self._request(
+            "GET", self._form_path(form_id) + "/assignments", accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
+    def form_dataset_diff(self, form_id: str) -> list[dict[str, Any]]:
+        return _items(self.get_json(self._form_path(form_id) + "/dataset-diff"))
+
     def system_config(self, key: str) -> dict[str, Any]:
         return dict(self.get_json(f"/v1/config/{_quote(key)}"))
 
@@ -180,10 +294,16 @@ class CentralClient:
         return self.get_json("/v1/analytics/preview")
 
     def submissions(self, form_id: str) -> list[dict[str, Any]]:
-        return _items(self.get_json(self._form_path(form_id) + "/submissions"))
+        return _items(self._request(
+            "GET", self._form_path(form_id) + "/submissions", accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
 
     def form_versions(self, form_id: str) -> list[dict[str, Any]]:
-        return _items(self.get_json(self._form_path(form_id) + "/versions"))
+        return _items(self._request(
+            "GET", self._form_path(form_id) + "/versions", accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
 
     def form_version_bytes(self, form_id: str, version: str, extension: str) -> bytes:
         path = self._form_path(form_id) + f"/versions/{_quote(version)}.{extension}"

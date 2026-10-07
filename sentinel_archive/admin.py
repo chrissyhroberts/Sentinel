@@ -19,14 +19,23 @@ from .project import audit_instance_id
 
 ADMIN_ACTIONS = {
     "user.create", "user.update", "user.delete", "user.session.create",
-    "user.assignment.create", "user.assignment.delete", "project.create",
+    "user.assignment.create", "user.assignment.delete", "user.preference.update",
+    "user.preference.delete", "project.create",
     "project.update", "project.delete", "form.create", "form.update",
     "form.update.draft.set", "form.update.draft.delete", "form.update.publish",
     "form.update.draft.replace", "form.delete", "form.restore", "form.purge",
+    "form.attachment.update", "form.submissions.export",
     "field_key.create", "field_key.assignment.create", "field_key.assignment.delete",
-    "field_key.session.end", "field_key.delete", "public_link.create",
+    "field_key.session.end", "field_key.delete", "field_key.property.set", "public_link.create",
     "public_link.assignment.create", "public_link.assignment.delete",
-    "public_link.session.end", "public_link.delete", "config.set", "upgrade.server",
+    "public_link.session.end", "public_link.delete", "public_link.property.set",
+    "actor_property.create", "submission.create", "submission.update",
+    "submission.update.version", "submission.attachment.update", "submission.delete",
+    "submission.purge", "submission.restore", "dataset.create", "dataset.update",
+    "dataset.update.publish", "dataset.delete", "dataset.update.property.delete",
+    "entity.create", "entity.error", "entity.update.version", "entity.update.resolve",
+    "entity.delete", "entity.restore", "entity.purge", "entity.bulk.delete",
+    "config.set", "upgrade.server",
 }
 
 

@@ -4,7 +4,7 @@ These four XLSForms are reusable synthetic-data fixtures. Publish them in
 each project that will be routinely validated:
 
 - `sentinel_validation_central.xlsx` - Central/API submission, edit, version,
-  reason and Sentinel-detection checks.
+  reason, disposable form-create/form-delete, and Sentinel-detection checks.
 - `sentinel_validation_enketo.xlsx` - tightly scoped Enketo rendering, entry,
   edit and reason checks.
 - `sentinel_validation_collect.xlsx` - tightly scoped Collect device, audit,

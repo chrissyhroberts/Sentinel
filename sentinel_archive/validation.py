@@ -205,6 +205,10 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         deprecated_id=initial_id,
     )
     checks: list[dict[str, str]] = []
+    lifecycle_form_id = "sentinel_validation_lifecycle_" + uuid.uuid4().hex[:10]
+    lifecycle_xml = _lifecycle_form_xml(lifecycle_form_id)
+    lifecycle_created = False
+    lifecycle_deleted = False
 
     def add(check_id: str, passed: bool, detail: str, evidence: str = "validation_report.json") -> None:
         checks.append({
@@ -306,6 +310,54 @@ def run_active_validation(client: Any) -> dict[str, Any]:
     except (CentralError, ET.ParseError) as error:
         add("central_active_create", False, f"Active validation failed: {type(error).__name__}: {error}")
 
+    # Form lifecycle is tested separately so a permission failure here does
+    # not hide the submission/edit validation results above. The form is
+    # uniquely named, contains no submissions, and is deleted immediately.
+    lifecycle_evidence: dict[str, Any] = {
+        "form_id": lifecycle_form_id,
+        "definition_xml": lifecycle_xml.decode("utf-8"),
+        "created_response": {},
+        "active_forms_after_create": [],
+        "deleted_response": {},
+        "deleted_forms_after_delete": [],
+    }
+    try:
+        lifecycle_evidence["created_response"] = client.create_form(lifecycle_xml, publish=False)
+        lifecycle_created = True
+        active_forms = client.forms()
+        lifecycle_evidence["active_forms_after_create"] = [
+            item for item in active_forms
+            if str(item.get("xmlFormId") or item.get("formId") or "") == lifecycle_form_id
+        ]
+        add("central_active_form_create", bool(lifecycle_evidence["active_forms_after_create"]),
+            f"Created and rediscovered disposable validation form {lifecycle_form_id}")
+    except (AttributeError, CentralError, ET.ParseError) as error:
+        add("central_active_form_create", False,
+            f"Synthetic form creation failed: {type(error).__name__}: {error}")
+    finally:
+        if lifecycle_created:
+            try:
+                lifecycle_evidence["deleted_response"] = client.delete_form(lifecycle_form_id)
+                lifecycle_deleted = True
+            except (AttributeError, CentralError) as error:
+                add("central_active_form_delete", False,
+                    f"Synthetic form deletion failed: {type(error).__name__}: {error}")
+        if lifecycle_created and lifecycle_deleted:
+            try:
+                deleted_forms = client.forms(deleted=True)
+                lifecycle_evidence["deleted_forms_after_delete"] = [
+                    item for item in deleted_forms
+                    if str(item.get("xmlFormId") or item.get("formId") or "") == lifecycle_form_id
+                ]
+                add("central_active_form_delete", True,
+                    f"Deleted disposable validation form {lifecycle_form_id}")
+                add("central_active_form_trash_readback",
+                    bool(lifecycle_evidence["deleted_forms_after_delete"]),
+                    "Central returned the deleted validation form in project Trash")
+            except (AttributeError, CentralError) as error:
+                add("central_active_form_trash_readback", False,
+                    f"Deleted form readback failed: {type(error).__name__}: {error}")
+
     failures = sum(check["status"] == "fail" for check in checks)
     evidence = {
         "central/form_versions.json": form_versions if "form_versions" in locals() else [],
@@ -325,6 +377,7 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         "central/audits.json": audits if "audits" in locals() else [],
         "central/comments.json": comments if "comments" in locals() else [],
         "central/attachment_inventory.json": attachment_inventory if "attachment_inventory" in locals() else [],
+        "central/form_lifecycle.json": lifecycle_evidence,
         "central/hashes.json": {
             "original_sha256": initial_hash if "initial_hash" in locals() else "",
             "edited_sha256": _sha(current_xml) if "current_xml" in locals() else "",
@@ -352,6 +405,9 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         "sentinel_active_deterministic_id": f"{evidence_root}/central/validation_scope.json",
         "sentinel_active_evidence_capture": f"{evidence_root}/evidence_manifest.json",
         "sentinel_active_synthetic_scope": f"{evidence_root}/central/validation_scope.json",
+        "central_active_form_create": f"{evidence_root}/central/form_lifecycle.json",
+        "central_active_form_delete": f"{evidence_root}/central/form_lifecycle.json",
+        "central_active_form_trash_readback": f"{evidence_root}/central/form_lifecycle.json",
     }
     for check in checks:
         check["evidence_ref"] = evidence_refs.get(check["check_id"], f"{evidence_root}/evidence_manifest.json")
@@ -446,6 +502,28 @@ def _validation_xml(form_id: str, instance_id: str, run_id: str, value: str,
     return xml.encode("utf-8")
 
 
+def _lifecycle_form_xml(form_id: str) -> bytes:
+    """Minimal empty validation form used only for create/delete lifecycle tests."""
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<h:html xmlns:h="http://www.w3.org/1999/xhtml" xmlns:orx="http://openrosa.org/xforms">
+  <h:head>
+    <h:title>Sentinel disposable lifecycle validation</h:title>
+    <model xmlns="http://www.w3.org/2002/xforms">
+      <instance>
+        <data id="{escape(form_id)}" xmlns:orx="http://openrosa.org/xforms">
+          <test_value />
+          <orx:meta><orx:instanceID /></orx:meta>
+        </data>
+      </instance>
+      <bind nodeset="/data/test_value" type="string" />
+    </model>
+  </h:head>
+  <h:body xmlns="http://www.w3.org/1999/xhtml">
+    <input ref="/data/test_value"><label>Sentinel lifecycle test</label></input>
+  </h:body>
+</h:html>'''.encode("utf-8")
+
+
 def _xml_field(root: ET.Element, name: str) -> str:
     for element in root.iter():
         if element.tag.rsplit("}", 1)[-1] == name:
@@ -529,17 +607,18 @@ def _write_validation_pdf(report: dict[str, Any], path: Path) -> None:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
-    from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
+    from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     styles = getSampleStyleSheet()
     title = ParagraphStyle("CertificateTitle", parent=styles["Title"], fontName="Helvetica-Bold",
-                           fontSize=18, leading=22, textColor=colors.HexColor("#17324D"), alignment=TA_LEFT)
+                           fontSize=19, leading=23, textColor=colors.HexColor("#17324D"), alignment=TA_LEFT)
     heading = ParagraphStyle("CertificateHeading", parent=styles["Heading2"], fontName="Helvetica-Bold",
                              fontSize=11, leading=14, textColor=colors.HexColor("#17324D"), spaceBefore=8)
     body = ParagraphStyle("CertificateBody", parent=styles["BodyText"], fontName="Helvetica",
                           fontSize=8.5, leading=11, textColor=colors.HexColor("#222222"))
     small = ParagraphStyle("CertificateSmall", parent=body, fontSize=7.2, leading=9)
     status = str(report.get("status", "unknown")).upper()
+    status_label = "PASS" if status == "PASSED" else "ACTION REQUIRED" if status == "FAILED" else status
     summary = report.get("summary", {})
     project_id = report.get("project_id", "")
     created = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -550,10 +629,27 @@ def _write_validation_pdf(report: dict[str, Any], path: Path) -> None:
     story: list[Any] = [
         Paragraph("Sentinel automated validation certificate", title),
         Spacer(1, 3 * mm),
-        Paragraph(f"Project: <b>{project_id}</b> &nbsp;&nbsp; Status: <b>{status}</b> &nbsp;&nbsp; "
-                  f"Generated: {created}", body),
-        Paragraph(f"Checks: {summary.get('checks', 0)} &nbsp; Passed: {summary.get('passed', 0)} "
-                  f"&nbsp; Failed: {summary.get('failed', 0)}", body),
+        Paragraph(f"Project: <b>{project_id}</b> &nbsp;&nbsp; Run: <b>{report.get('validation_run_id', '—')}</b> "
+                  f"&nbsp;&nbsp; Generated: {created}", body),
+    ]
+    status_color = colors.HexColor("#19733A") if status == "PASSED" else colors.HexColor("#A12828")
+    status_table = Table([
+        [Paragraph(f"<font color='{status_color.hexval()}'><b>{status_label}</b></font>",
+                   ParagraphStyle("CertificateStatus", parent=body, fontSize=14, leading=17)),
+         Paragraph(f"<b>{summary.get('checks', 0)}</b> checks &nbsp; "
+                   f"<font color='#19733A'><b>{summary.get('passed', 0)} passed</b></font> &nbsp; "
+                   f"<font color='#A12828'><b>{summary.get('failed', 0)} failed</b></font>", body)]
+    ], colWidths=[42 * mm, 90 * mm])
+    status_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#EEF6F0") if status == "PASSED" else colors.HexColor("#FCE8E6")),
+        ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#F6F8FA")),
+        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#A8B5C2")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D5DDE3")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7), ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    story += [status_table,
         Spacer(1, 4 * mm),
         Paragraph("Certificate scope", heading),
         Paragraph("This certificate is the human-readable review view of the accompanying "
@@ -564,22 +660,25 @@ def _write_validation_pdf(report: dict[str, Any], path: Path) -> None:
                   "unless those checks are explicitly present.", body),
         Spacer(1, 3 * mm),
         Paragraph("Test results and evidence references", heading),
+        Paragraph("The exact JSON report remains authoritative. Evidence references below point "
+                  "to the corresponding files in the accompanying evidence_package.zip.", body),
+        Spacer(1, 2 * mm),
     ]
-    table_data = [[Paragraph("Test", small), Paragraph("Component", small), Paragraph("Mode", small),
-                   Paragraph("Result", small), Paragraph("Evidence", small), Paragraph("Detail", small)]]
+    table_data = [[Paragraph("Test", small), Paragraph("Component", small), Paragraph("Result", small),
+                   Paragraph("Evidence", small), Paragraph("What was checked", small)]]
     for check in report.get("checks", []):
         result = str(check.get("status", "")).upper()
         result_color = "#19733A" if result == "PASS" else "#A12828"
         evidence = check.get("evidence_ref", "validation_report.json")
+        human_check = str(check.get("check_id", "")).replace("_", " ").strip().capitalize()
         table_data.append([
-            Paragraph(str(check.get("check_id", "")), small),
+            Paragraph(human_check, small),
             Paragraph(str(check.get("component", "")), small),
-            Paragraph(str(check.get("mode", "")), small),
             Paragraph(f'<font color="{result_color}"><b>{result}</b></font>', small),
             Paragraph(f'<link href="{evidence}"><u>{evidence}</u></link>', small),
             Paragraph(str(check.get("detail", "")), small),
         ])
-    table = LongTable(table_data, repeatRows=1, colWidths=[27 * mm, 31 * mm, 23 * mm, 19 * mm, 61 * mm, 103 * mm])
+    table = LongTable(table_data, repeatRows=1, colWidths=[44 * mm, 31 * mm, 19 * mm, 65 * mm, 114 * mm])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DCE6F0")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#17324D")),

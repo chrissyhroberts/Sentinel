@@ -100,6 +100,24 @@ class ActiveFakeClient:
         self.initial = None
         self.updated = False
         self.submitted = []
+        self.lifecycle_forms = set()
+        self.deleted_lifecycle_forms = set()
+
+    def create_form(self, form_xml, *, publish=False):
+        import xml.etree.ElementTree as ET
+        form_id = ET.fromstring(form_xml).find('.//{*}data').get('id')
+        self.lifecycle_forms.add(form_id)
+        return {"xmlFormId": form_id}
+
+    def delete_form(self, form_id):
+        self.lifecycle_forms.discard(form_id)
+        self.deleted_lifecycle_forms.add(form_id)
+        return {"success": True}
+
+    def forms(self, *, deleted=False):
+        if deleted:
+            return [{"xmlFormId": value} for value in self.deleted_lifecycle_forms]
+        return [{"xmlFormId": value} for value in self.lifecycle_forms]
 
     def create_validation_submission(self, form_id, xml, *, device_id):
         self.initial = xml
@@ -151,17 +169,32 @@ class ActiveFakeClient:
 
 
 class CrawlerTests(unittest.TestCase):
+    def test_form_version_v6_attaches_xml_and_original_xlsx(self):
+        client = FakeClient()
+        client.config = FakeConfig()
+        client.config.audit_form_version = "6"
+        sink = FakeSink()
+        fields = ProjectAuditor(client, sink=sink)._submit_form_version(
+            "trial", "2026-10-05", {}, "run-1"
+        )
+        self.assertEqual(fields["source_form_definition_xml"], "source_form_definition.xml")
+        self.assertEqual(fields["source_form_definition_xlsx"], "source_form_definition.xlsx")
+        self.assertEqual(set(sink.submissions[-1][2]), {
+            "source_form_definition.xml", "source_form_definition.xlsx"
+        })
+
     def test_active_validation_exercises_synthetic_create_edit_and_evidence(self):
         client = ActiveFakeClient()
         report = run_active_validation(client)
         self.assertEqual(report["status"], "passed")
-        self.assertEqual(report["summary"], {"checks": 20, "passed": 20, "failed": 0})
+        self.assertEqual(report["summary"], {"checks": 23, "passed": 23, "failed": 0})
         self.assertEqual(report["mode"], "active_synthetic_validation")
         self.assertTrue(all(check["evidence_ref"].startswith("evidence_") for check in report["checks"]))
         self.assertEqual(
             {check["check_id"] for check in report["checks"]},
             {
                 "central_active_create", "central_active_form_definition", "central_active_edit",
+                "central_active_form_create", "central_active_form_delete", "central_active_form_trash_readback",
                 "central_active_version_records", "central_active_version_identity",
                 "central_active_original_version_readback", "central_active_attachment_inventory",
                 "central_active_diff", "central_active_diff_structure", "central_active_reason",
@@ -234,10 +267,13 @@ class CrawlerTests(unittest.TestCase):
         self.assertIn(b"<central_actor_id>user@example.org</central_actor_id>", submission[1])
         self.assertIn(b"Changed: /answer: old -&gt; new | Reason: corrected source value", submission[1])
         manifest = [item for item in sink.submissions if b"<record_type>sentinel_run_qa_snapshot</record_type>" in item[1]][0]
-        self.assertEqual(set(manifest[2]), {
+        expected_attachments = {
             "timestamp_manifest.json", "project_health_snapshot.json",
             "project_user_roles_snapshot.json", "validation_report.json",
-        })
+        }
+        if "sentinel_qa_summary.pdf" in manifest[2]:
+            expected_attachments.add("sentinel_qa_summary.pdf")
+        self.assertEqual(set(manifest[2]), expected_attachments)
         self.assertIn(b"submission_edit", manifest[2]["timestamp_manifest.json"])
         self.assertIn(b'"chain": {\n    "status": "genesis"', manifest[2]["timestamp_manifest.json"])
         self.assertIn(b"<timestamp_manifest>timestamp_manifest.json</timestamp_manifest>", manifest[1])
@@ -249,6 +285,11 @@ class CrawlerTests(unittest.TestCase):
         self.assertIn(b"<project_user_roles_snapshot>project_user_roles_snapshot.json</project_user_roles_snapshot>", manifest[1])
         self.assertIn(b"<validation_report>validation_report.json</validation_report>", manifest[1])
         self.assertIn(b'"retained_versions": 1', manifest[2]["project_health_snapshot.json"])
+        self.assertIn(b'"schema": "methodmesh.sentinel.project_health_snapshot.v2"',
+                      manifest[2]["project_health_snapshot.json"])
+        self.assertIn(b'"report_type": "regular_project_platform_report"',
+                      manifest[2]["project_health_snapshot.json"])
+        self.assertIn(b'"project_name": "Test project"', manifest[2]["project_health_snapshot.json"])
         self.assertIn(b'project_user_roles_snapshot.v1', manifest[2]["project_user_roles_snapshot.json"])
         self.assertIn(b'"display_name": "Test User"', manifest[2]["project_user_roles_snapshot.json"])
         self.assertIn(b'"roles": [\n          "manager"', manifest[2]["project_user_roles_snapshot.json"])

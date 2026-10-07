@@ -32,15 +32,18 @@ interactive password prompt, `password_env`, or a locally stored `password`.
 The privileged admin run always prompts for its administrator password.
 
 The audit boundary is always one explicitly configured Central project. See
-the [universal project audit form contract](docs/operational/PROJECT_AUDIT_FORM_CONTRACT.md).
+the [universal project audit form contract](docs/operational/PROJECT_AUDIT_FORM_CONTRACT.md)
+and the [Central API coverage inventory](docs/operational/CENTRAL_API_COVERAGE.md).
 
 Operational procedures are in [docs/operational](docs/operational/). The
 risk-based validation checklist and workflow are in
 [docs/validation](docs/validation/).
 
-The current test form is `audit_001`, version 5. The form ID and version are
+The current test form is `audit_001`, version 6. The form ID and version are
 configuration values, so the same code can be used with a universal audit form
-on another Central installation.
+on another Central installation. Version 6 adds dedicated attachments for the
+exact deployed source-form XML and, when Central retains it, the original
+source XLSForm workbook.
 
 The implementation is in `sentinel_archive/`. It downloads exact submission
 versions, Collect audit attachments, Central diffs and Central audit metadata,
@@ -84,8 +87,8 @@ python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --admin-validate
 Configure `admin_email`, `admin_project_ids`, optional `admin_audit_start` and
 `admin_audit_end`, and optional `admin_host_snapshot_path`. The admin password
 is prompted for interactively. A blank window covers the preceding 31 days.
-The run submits one `admin_platform_snapshot` record containing the scoped
-Central administration evidence and JSON/PDF/ZIP outputs. Host disk space and
+The admin run submits one `admin_platform_snapshot` record containing the
+scoped Central administration evidence and JSON/PDF/ZIP outputs. Host disk space and
 uptime are not exposed by the ordinary Central API; supply them through the
 optional host snapshot JSON when required. See
 `docs/operational/ADMIN_SENTINEL.md`.
@@ -108,10 +111,11 @@ deterministic record and only submits new source versions or new enabled audit
 events.
 
 Each run submits one consolidated `sentinel_run_qa_snapshot` record carrying the
-timestamp manifest, project health snapshot, project user/role snapshot,
-validation report/certificate and any evidence package through their dedicated
-attachment fields. This keeps the audit table at one run line while preserving
-separate downloadable evidence files. The JSON/PDF files capture
+timestamp manifest, detailed project health snapshot, manager-facing QA PDF,
+project user/role snapshot, validation report/certificate and any evidence
+package through their dedicated attachment fields. This keeps the audit table
+at one run line while preserving separate downloadable evidence files. The
+summary PDF captures
 project-account-visible Central observations such as project metadata,
 source-form inventory, user assignments, form version counts, submission
 counts, retained-version counts and latest submission times. Host-wide metrics
@@ -158,7 +162,7 @@ By default this writes paired artifacts under
 
 - `validation_report.json` - the machine-readable authoritative report;
 - `validation_certificate.pdf` - the human-readable certificate, with one row
-  per test, component ownership, mode, pass/fail result and a link to the JSON
+  per test, component ownership, mode, pass/fail result and a link to the raw
   evidence bundle.
 - `evidence_package.zip` - the active-validation bundle containing raw API
   evidence and an SHA-256 manifest.
@@ -179,12 +183,16 @@ python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --validate-activ
 ```
 
 This creates one synthetic record in `sentinel_validation_central`, updates it
-once, and runs a 20-check Central/Sentinel exercise covering form-definition
+once, and runs a Central/Sentinel exercise covering form-definition
 readability, creation, retained structured versions, distinct version
 identities, independent original-version readback, attachment inventory,
 field-level diff, linked reason, audit-trail and actor evidence, metadata and
 comments access, XML well-formedness, validation-run identity, before/after
-hashes, deterministic identity, evidence capture and synthetic-form scope.
+hashes, deterministic identity, evidence capture and synthetic-form scope. It
+also creates a uniquely named disposable validation form, confirms that Central
+lists it, deletes it to Trash, and confirms the deletion through the
+deleted-forms endpoint. The disposable form contains no submissions and is
+never part of the study source scope.
 The JSON report and PDF certificate are written to the same validation output
 directory as the read-only review.
 
