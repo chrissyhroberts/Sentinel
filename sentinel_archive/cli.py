@@ -9,8 +9,8 @@ from pathlib import Path
 from .central import CentralClient, CentralConfig
 from .crawler import ProjectAuditor
 from .project import audit_instance_id
-from .validation import (run_active_validation, validate_plan, validation_error,
-                         write_validation_artifacts)
+from .validation import (run_active_validation, submit_active_validation_evidence,
+                         validate_plan, validation_error, write_validation_artifacts)
 
 
 def main() -> None:
@@ -54,7 +54,9 @@ def main() -> None:
     if args.validate_active:
         report = run_active_validation(client)
         artifacts = write_validation_artifacts(report, args.validation_output)
-        print(json.dumps({"report": report, "artifacts": artifacts}, indent=2))
+        audit_id = submit_active_validation_evidence(client, report, artifacts)
+        print(json.dumps({"report": report, "artifacts": artifacts,
+                          "audit_record": audit_id}, indent=2))
         return
     try:
         plan = auditor.plan()

@@ -164,6 +164,11 @@ action reason. Sentinel also hashes the retrieved XML before and after the
 edit. The JSON report and PDF certificate are written to the same validation
 output directory as the read-only review.
 
+The active report is also submitted to the configured audit form as a
+`validation_certificate` record, with `validation_report.json` and—when PDF
+generation is available—`validation_certificate.pdf` attached. The command
+prints the resulting audit record ID.
+
 The active run uses synthetic validation data only. It does not open, edit or
 delete a source-study submission, and it does not claim to have tested
 Collect, Enketo or MethodMesh. Those components require their separate

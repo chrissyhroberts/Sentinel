@@ -2,7 +2,9 @@ import json
 import unittest
 
 from sentinel_archive.crawler import ProjectAuditor
-from sentinel_archive.validation import run_active_validation, validate_plan
+from sentinel_archive.validation import (run_active_validation,
+                                         submit_active_validation_evidence,
+                                         validate_plan, write_validation_artifacts)
 
 
 class FakeConfig:
@@ -71,6 +73,8 @@ class FakeSink:
 class ActiveFakeClient:
     class Config:
         project_id = "16"
+        audit_form_id = "sentinel_project_audit"
+        audit_form_version = "1"
         validation_form_ids = ("sentinel_validation_central",)
 
     config = Config()
@@ -79,6 +83,7 @@ class ActiveFakeClient:
         self.current = None
         self.initial = None
         self.updated = False
+        self.submitted = []
 
     def create_validation_submission(self, form_id, xml, *, device_id):
         self.initial = xml
@@ -106,13 +111,29 @@ class ActiveFakeClient:
             "actionNotes": "Sentinel validation changed test_value from CENTRAL-A to CENTRAL-B"
         }}]
 
+    def submit(self, form_id, xml, attachments):
+        self.submitted.append((form_id, xml, attachments))
+
 
 class CrawlerTests(unittest.TestCase):
     def test_active_validation_exercises_synthetic_create_edit_and_evidence(self):
-        report = run_active_validation(ActiveFakeClient())
+        client = ActiveFakeClient()
+        report = run_active_validation(client)
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["summary"], {"checks": 5, "passed": 5, "failed": 0})
         self.assertEqual(report["mode"], "active_synthetic_validation")
+        with self.subTest("audit evidence"):
+            from tempfile import TemporaryDirectory
+            with TemporaryDirectory() as directory:
+                artifacts = write_validation_artifacts(report, directory)
+                audit_id = submit_active_validation_evidence(client, report, artifacts)
+                self.assertTrue(audit_id.startswith("uuid:sentinel-"))
+                self.assertEqual(len(client.submitted), 1)
+                expected_attachments = {"validation_report.json"}
+                if artifacts.get("pdf"):
+                    expected_attachments.add("validation_certificate.pdf")
+                self.assertEqual(set(client.submitted[0][2]), expected_attachments)
+                self.assertIn(b"<record_type>validation_certificate</record_type>", client.submitted[0][1])
 
     def test_read_only_validation_separates_central_and_sentinel_checks(self):
         client = FakeClient()

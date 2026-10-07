@@ -30,6 +30,10 @@ diff/reason evidence and before/after XML hashes. It is safe to repeat because
 each run uses a fresh validation run ID. It is not a substitute for the
 Collect, Enketo or MethodMesh checks below.
 
+The report and certificate are also pushed into the configured audit form as
+a `validation_certificate` record, so the validation result is retained in
+the same Central evidence boundary as the ordinary Sentinel run evidence.
+
 Detailed checklists:
 
 - [ODK Central](ODK_CENTRAL_VALIDATION_CHECKLIST.md)

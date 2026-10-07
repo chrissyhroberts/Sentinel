@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .central import CentralError
-from .crawler import AuditPlan, _sha
+from .crawler import AuditPlan, _audit_xml, _sha
 from .project import audit_instance_id
 from xml.sax.saxutils import escape
 
@@ -202,6 +202,53 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         "checks": checks,
         "safety": "Synthetic validation data only; no participant or source-study form was modified.",
     }
+
+
+def submit_active_validation_evidence(client: Any, report: dict[str, Any],
+                                      artifacts: dict[str, str]) -> str:
+    """Submit the active report and certificate to the configured audit form."""
+    run_id = str(report["validation_run_id"])
+    report_path = Path(artifacts["json"])
+    report_bytes = report_path.read_bytes()
+    attachments = {"validation_report.json": report_bytes}
+    pdf_path = artifacts.get("pdf", "")
+    if pdf_path:
+        candidate = Path(pdf_path)
+        if candidate.exists():
+            attachments["validation_certificate.pdf"] = candidate.read_bytes()
+    audit_id = audit_instance_id(str(client.config.project_id), "active-validation", run_id, run_id)
+    created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    status = str(report.get("status", "failed"))
+    fields = {
+        "record_type": "validation_certificate",
+        "project_id": str(client.config.project_id),
+        "source_form_id": str(report.get("validation_form_id", "")),
+        "source_instance_id": "",
+        "source_version_id": run_id,
+        "source_audit_instance_id": audit_id,
+        "source_content_sha256": _sha(report_bytes),
+        "collect_audit_sha256": "",
+        "central_created_at": created_at,
+        "central_actor_id": "",
+        "change_reason": f"Active validation certificate; status={status}"[:64],
+        "reason_link_status": "sentinel_active_validation",
+        "timestamp_status": "not_requested",
+        "timestamp_time": "",
+        "timestamp_batch_id": run_id,
+        "timestamp_batch_sha256": _sha(report_bytes),
+        "timestamp_manifest": "validation_report.json",
+        "timestamp_token": "",
+        "timestamp_certificate": "",
+        "sentinel_run_id": run_id,
+        "checkpoint_cursor": str(report.get("summary", {}).get("checks", 0)),
+    }
+    client.submit(
+        client.config.audit_form_id,
+        _audit_xml(audit_id, fields, getattr(client.config, "audit_form_version", "1"),
+                   client.config.audit_form_id),
+        attachments,
+    )
+    return audit_id
 
 
 def _validation_xml(form_id: str, instance_id: str, run_id: str, value: str,
