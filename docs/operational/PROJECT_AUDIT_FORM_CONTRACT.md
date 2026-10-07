@@ -78,12 +78,10 @@ a run-level, timestamp-anchored chain that can expose an altered or missing
 intermediate manifest. It is deliberately not a `previous_attestation_hash`
 chain on every source record.
 
-Every run also creates a `validation_certificate` record. Its
-`validation_report.json` attachment contains the checks performed during the
-run, and `validation_certificate.pdf` is the human-readable review copy. The
-report includes deterministic-ID uniqueness, planned-versus-processed
-reconciliation, manifest-chain status and timestamp status. The certificate
-has its own hash and timestamp evidence.
+Every run carries the validation report and human-readable certificate on the
+same `run_timestamp_manifest` record. The report includes deterministic-ID
+uniqueness, planned-versus-processed reconciliation, manifest-chain status and
+timestamp status.
 
 The active validation certificate contains twenty automated checks. Its PDF
 `evidence_ref` values point to concrete raw files inside
@@ -99,21 +97,15 @@ fetching work, so completed versions are not repeated.
 No project-specific field names, participant fields, XLSForm recipes, or
 MethodMesh attestation payloads are required.
 
-Each run also creates one `project_health_snapshot` record. Its
-`platform_snapshot.json` attachment records project metadata and the
-project-account-visible inventory of source forms, published form versions,
-submission counts, retained submission-version counts and latest submission
-times. `platform_snapshot.pdf` is the corresponding human-readable copy. It
-does not claim to measure server disk space, uptime, CPU, memory,
-backups or other host-wide infrastructure; those metrics belong to a
-separately privileged Admin Sentinel.
-
-Each run also creates one `project_user_roles_snapshot` record. This is a
-separate daily line in the audit form containing the Web Users visible to the
-regular account, the available role definitions, and the current assignments
-for the configured project. If Central does not grant one of these reads, the
-snapshot records that limitation explicitly rather than treating the data as
-complete.
+Each run carries a `project_health_snapshot.json` and PDF, plus a
+`project_user_roles_snapshot.json` and PDF, on that same run record. The health
+snapshot records project metadata and source-form/submission inventory. The
+user-role snapshot records the Web Users visible to the regular account, role
+definitions and current project assignments. If Central does not grant one of
+these reads, the snapshot records that limitation explicitly rather than
+treating the data as complete. Neither claims to measure server disk space,
+uptime, CPU, memory or backups; those metrics belong to separately privileged
+Admin Sentinel.
 
 An explicitly invoked Admin Sentinel run creates one
 `admin_platform_snapshot` record. It uses the existing `platform_snapshot`,

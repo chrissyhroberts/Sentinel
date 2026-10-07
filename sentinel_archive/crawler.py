@@ -154,32 +154,36 @@ class ProjectAuditor:
                 })
                 if getattr(self.client, "debug", False):
                     print("[debug] Central already has this audit record; continuing", file=sys.stderr)
-        snapshot_fields = self._submit_platform_snapshot(plan, run_id)
-        run_records.append({
-            "audit_instance_id": snapshot_fields["source_audit_instance_id"],
-            "record_type": snapshot_fields["record_type"],
-            "status": "submitted",
-            "source_form_id": "",
-            "source_instance_id": "",
-            "source_version_id": run_id,
-            "source_content_sha256": snapshot_fields["source_content_sha256"],
-        })
-        users_fields = self._submit_user_roles_snapshot(run_id)
-        run_records.append({
-            "audit_instance_id": users_fields["source_audit_instance_id"],
-            "record_type": users_fields["record_type"],
-            "status": "submitted",
-            "source_form_id": "",
-            "source_instance_id": "",
-            "source_version_id": run_id,
-            "source_content_sha256": users_fields["source_content_sha256"],
-        })
+        snapshot_fields, snapshot_attachments = self._submit_platform_snapshot(plan, run_id, submit=False)
+        users_fields, users_attachments = self._submit_user_roles_snapshot(run_id, submit=False)
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped, run_id=run_id)
         previous = self._previous_manifest_reference()
-        manifest_fields = self._submit_run_manifest(run_id, run_records, previous)
-        self._submit_validation_certificate(run_id, plan, run_records, previous, manifest_fields)
+        manifest_fields, manifest_attachments = self._submit_run_manifest(run_id, run_records, previous, submit=False)
+        validation_fields, validation_attachments = self._submit_validation_certificate(
+            run_id, plan, run_records, previous, manifest_fields, submit=False)
+        for key in ("project_health_snapshot", "project_health_snapshot_pdf",
+                    "project_user_roles_snapshot", "project_user_roles_snapshot_pdf"):
+            if snapshot_fields.get(key):
+                manifest_fields[key] = snapshot_fields[key]
+            if users_fields.get(key):
+                manifest_fields[key] = users_fields[key]
+        for key in ("validation_report", "validation_certificate", "evidence_package"):
+            if validation_fields.get(key):
+                manifest_fields[key] = validation_fields[key]
+        manifest_attachments.update(snapshot_attachments)
+        manifest_attachments.update(users_attachments)
+        for filename in ("validation_report.json", "validation_certificate.pdf", "evidence_package.zip"):
+            if filename in validation_attachments:
+                manifest_attachments[filename] = validation_attachments[filename]
+        self.sink.submit(
+            self.client.config.audit_form_id,
+            _audit_xml(run_manifest_instance_id(self.project_id, run_id), manifest_fields,
+                       getattr(self.client.config, "audit_form_version", "1"),
+                       self.client.config.audit_form_id),
+            manifest_attachments,
+        )
         return RunSummary(self.project_id, seen, submitted + skipped, submitted, skipped, form_versions_submitted)
 
     def _central_event_tasks(self, forms: tuple[dict[str, Any], ...], source_tasks: list[tuple]) -> list[tuple]:
@@ -222,7 +226,7 @@ class ProjectAuditor:
             tasks.append(("central_event", "central-event", event_key, event_key, metadata))
         return tasks
 
-    def _submit_platform_snapshot(self, plan: AuditPlan, run_id: str) -> dict[str, str]:
+    def _submit_platform_snapshot(self, plan: AuditPlan, run_id: str, *, submit: bool = True):
         project_status = "available"
         project_metadata: dict[str, Any] = {}
         try:
@@ -306,15 +310,16 @@ class ProjectAuditor:
         snapshot_attachments = {json_attachment: snapshot_bytes}
         if snapshot_pdf:
             snapshot_attachments[pdf_attachment] = snapshot_pdf
-        self.sink.submit(
-            self.client.config.audit_form_id,
-            _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
-                       self.client.config.audit_form_id),
-            snapshot_attachments,
-        )
-        return fields
+        if submit:
+            self.sink.submit(
+                self.client.config.audit_form_id,
+                _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
+                           self.client.config.audit_form_id),
+                snapshot_attachments,
+            )
+        return fields, snapshot_attachments
 
-    def _submit_user_roles_snapshot(self, run_id: str) -> dict[str, str]:
+    def _submit_user_roles_snapshot(self, run_id: str, *, submit: bool = True):
         inventory = self._project_user_inventory()
         snapshot = {
             "schema": "methodmesh.sentinel.project_user_roles_snapshot.v1",
@@ -364,13 +369,14 @@ class ProjectAuditor:
         attachments = {json_attachment: snapshot_bytes}
         if snapshot_pdf:
             attachments[pdf_attachment] = snapshot_pdf
-        self.sink.submit(
-            self.client.config.audit_form_id,
-            _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
-                       self.client.config.audit_form_id),
-            attachments,
-        )
-        return fields
+        if submit:
+            self.sink.submit(
+                self.client.config.audit_form_id,
+                _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
+                           self.client.config.audit_form_id),
+                attachments,
+            )
+        return fields, attachments
 
     def _project_user_inventory(self) -> dict[str, Any]:
         """Capture the regular account's current project users and roles."""
@@ -671,7 +677,7 @@ class ProjectAuditor:
         return max(candidates, key=lambda item: item[0])[1]
 
     def _submit_run_manifest(self, run_id: str, records: list[dict[str, Any]],
-                             previous: dict[str, str]) -> dict[str, str]:
+                             previous: dict[str, str], *, submit: bool = True):
         manifest = {
             "schema": "methodmesh.sentinel.run_timestamp_manifest.v1",
             "project_id": self.project_id,
@@ -718,26 +724,28 @@ class ProjectAuditor:
             "sentinel_run_id": run_id,
             "checkpoint_cursor": str(len(records)),
         }
-        self.sink.submit(
-            self.client.config.audit_form_id,
-            _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
-                       self.client.config.audit_form_id),
-            self._timestamp_attachments(manifest_bytes, evidence),
-        )
-        return fields
+        attachments = self._timestamp_attachments(manifest_bytes, evidence)
+        if submit:
+            self.sink.submit(
+                self.client.config.audit_form_id,
+                _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
+                           self.client.config.audit_form_id),
+                attachments,
+            )
+        return fields, attachments
 
     def _submit_validation_certificate(self, run_id: str, plan: AuditPlan,
                                        records: list[dict[str, Any]],
                                        previous: dict[str, str],
-                                       manifest_fields: dict[str, str]) -> None:
+                                       manifest_fields: dict[str, str], *, submit: bool = True):
         ids = [record.get("audit_instance_id", "") for record in records]
         checks = [
             _validation_check("audit_form_configured", bool(self.client.config.audit_form_id), "Audit form configured"),
             _validation_check("source_scope_discovered", bool(plan.forms), "Configured source-form scope discovered"),
             _validation_check("deterministic_ids_unique", len(ids) == len(set(ids)), "No duplicate audit IDs in run"),
             _validation_check(
-                "run_reconciled", len(records) == len(plan.tasks) + 2,
-                "Every planned task and both daily project snapshots have a run result",
+                "run_reconciled", len(records) == len(plan.tasks),
+                "Every planned source task has a run result; run evidence is consolidated below",
             ),
             _validation_check(
                 "manifest_chain", previous.get("status") in {"genesis", "previous_manifest_verified"},
@@ -764,8 +772,8 @@ class ProjectAuditor:
                 "forms": len(plan.forms),
                 "planned_records": len(plan.tasks),
                 "run_records": len(records),
-                "platform_snapshots": sum(record.get("record_type") == "project_health_snapshot" for record in records),
-                "user_role_snapshots": sum(record.get("record_type") == "project_user_roles_snapshot" for record in records),
+                "platform_snapshots": 1,
+                "user_role_snapshots": 1,
                 "submitted": sum(record.get("status") == "submitted" for record in records),
                 "already_present": sum(record.get("status") == "already_present" for record in records),
             },
@@ -776,11 +784,10 @@ class ProjectAuditor:
             },
         }
         certificate_bytes = (json.dumps(certificate, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
-        evidence = self._timestamp_manifest(certificate_bytes)
         certificate_pdf = _json_document_pdf(certificate, "Sentinel validation certificate")
-        audit_id = audit_instance_id(self.project_id, "validation-certificate", run_id, run_id)
+        audit_id = run_manifest_instance_id(self.project_id, run_id)
         fields = {
-            "record_type": "validation_certificate",
+            "record_type": "run_timestamp_manifest",
             "project_id": self.project_id,
             "source_form_id": "",
             "source_instance_id": "",
@@ -792,14 +799,14 @@ class ProjectAuditor:
             "central_actor_id": "",
             "change_reason": f"Validation certificate; status={status}"[:64],
             "reason_link_status": "sentinel_validation",
-            "timestamp_status": evidence.status,
-            "timestamp_time": evidence.time,
+            "timestamp_status": "covered_by_run_manifest",
+            "timestamp_time": "",
             "timestamp_batch_id": run_id,
-            "timestamp_batch_sha256": _sha(certificate_bytes),
+            "timestamp_batch_sha256": manifest_fields.get("timestamp_batch_sha256", ""),
             "timestamp_manifest": "",
-            "timestamp_token": "timestamp_token.tsr" if evidence.token else "",
-            "timestamp_token_sha256": _sha(evidence.token) if evidence.token else "",
-            "timestamp_certificate": "timestamp_certificate.pem" if evidence.certificate else "",
+            "timestamp_token": "",
+            "timestamp_token_sha256": "",
+            "timestamp_certificate": "",
             "platform_snapshot": "",
             "platform_snapshot_pdf": "",
             "validation_report": "validation_report.json",
@@ -811,16 +818,15 @@ class ProjectAuditor:
         certificate_attachments = {"validation_report.json": certificate_bytes}
         if certificate_pdf:
             certificate_attachments["validation_certificate.pdf"] = certificate_pdf
-        if evidence.token:
-            certificate_attachments["timestamp_token.tsr"] = evidence.token
-        if evidence.certificate:
-            certificate_attachments["timestamp_certificate.pem"] = evidence.certificate
-        self.sink.submit(
-            self.client.config.audit_form_id,
-            _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
-                       self.client.config.audit_form_id),
-            certificate_attachments,
-        )
+        if submit:
+            self.sink.submit(
+                self.client.config.audit_form_id,
+                _audit_xml(run_manifest_instance_id(self.project_id, run_id), fields,
+                           getattr(self.client.config, "audit_form_version", "1"),
+                           self.client.config.audit_form_id),
+                certificate_attachments,
+            )
+        return fields, certificate_attachments
 
     def _timestamp_manifest(self, manifest: bytes) -> TimestampEvidence:
         policy = getattr(self.client.config, "timestamp_policy", "preferred").lower()
@@ -905,10 +911,24 @@ def _json_document_pdf(document: dict[str, Any], title: str) -> bytes:
     body.fontSize = 8
     body.leading = 10
     story: list[Any] = [Paragraph(title, styles["Title"]), Spacer(1, 6 * mm)]
+
+    def add_value(key: str, value: Any, level: int = 0) -> None:
+        indent = "&nbsp;" * (level * 5)
+        if isinstance(value, dict):
+            story.append(Paragraph(f"{indent}<b>{escape(str(key))}</b>", body))
+            for child_key, child_value in value.items():
+                add_value(str(child_key), child_value, level + 1)
+        elif isinstance(value, list):
+            story.append(Paragraph(f"{indent}<b>{escape(str(key))}</b>", body))
+            for index, child_value in enumerate(value, 1):
+                add_value(f"[{index}]", child_value, level + 1)
+        else:
+            rendered = "" if value is None else str(value)
+            story.append(Paragraph(f"{indent}<b>{escape(str(key))}</b>: {escape(rendered)}", body))
+        story.append(Spacer(1, 1.1 * mm))
+
     for key, value in document.items():
-        rendered = json.dumps(value, ensure_ascii=False, sort_keys=True) if isinstance(value, (dict, list)) else str(value)
-        story.append(Paragraph(f"<b>{escape(str(key))}</b>: {escape(rendered)}", body))
-        story.append(Spacer(1, 1.5 * mm))
+        add_value(str(key), value)
     SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
                       topMargin=15 * mm, bottomMargin=15 * mm).build(story)
     return buffer.getvalue()

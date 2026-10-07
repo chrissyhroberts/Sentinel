@@ -107,23 +107,16 @@ Completed records are not rewritten. A subsequent run skips an existing
 deterministic record and only submits new source versions or new enabled audit
 events.
 
-Each run also submits a `validation_certificate` record. Its
-`validation_report.json` attachment contains the automated check results and
-its `validation_certificate.pdf` attachment is the human-readable copy. An
-active validation run also attaches `evidence_package.zip`, containing the
-JSON, PDF, raw API evidence and a hashed `evidence_manifest.json`. The JSON is
-independently timestamped using the same preferred/required policy. A
-certificate with warnings is still preserved for review; a required timestamp
-failure stops the run.
-
-Each run also submits a `project_health_snapshot` record with a
-`platform_snapshot.json` and `platform_snapshot.pdf` attachments. They capture
-project-account-visible
-Central observations such as project metadata, source-form inventory, form
-version counts, submission counts, retained-version counts and latest
-submission times. It deliberately excludes host-wide metrics such as disk
-space, uptime, CPU, memory and backups; those require a separately privileged
-Admin Sentinel.
+Each run submits one consolidated `run_timestamp_manifest` record carrying the
+timestamp manifest, project health snapshot, project user/role snapshot,
+validation report/certificate and any evidence package through their dedicated
+attachment fields. This keeps the audit table at one run line while preserving
+separate downloadable evidence files. The JSON/PDF files capture
+project-account-visible Central observations such as project metadata,
+source-form inventory, user assignments, form version counts, submission
+counts, retained-version counts and latest submission times. Host-wide metrics
+such as disk space, uptime, CPU, memory and backups require separately
+privileged Admin Sentinel.
 
 ## Failure and recovery behavior
 

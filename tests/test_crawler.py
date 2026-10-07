@@ -12,6 +12,7 @@ from sentinel_archive.validation import (run_active_validation,
 class FakeConfig:
     project_id = "16"
     audit_form_id = "sentinel_project_audit"
+    audit_form_version = "5"
     timestamp_policy = "disabled"
     timestamp_url = "https://tsa.example.invalid/tsa"
     validation_form_ids = ("sentinel_validation_central",)
@@ -214,35 +215,29 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(summary.forms_seen, 1)
         self.assertEqual(summary.versions_submitted, 1)
         self.assertEqual(summary.form_versions_submitted, 1)
-        self.assertEqual(len(sink.submissions), 7)
+        self.assertEqual(len(sink.submissions), 4)
         submission = [item for item in sink.submissions if b"linked_collect_audit" in item[1]][0]
         self.assertIn(b"<record_type>submission_edit</record_type>", submission[1])
         self.assertIn(b"<central_actor_id>user@example.org</central_actor_id>", submission[1])
         self.assertIn(b"Changed: /answer: old -&gt; new | Reason: corrected source value", submission[1])
         manifest = [item for item in sink.submissions if b"<record_type>run_timestamp_manifest</record_type>" in item[1]][0]
-        self.assertEqual(set(manifest[2]), {"timestamp_manifest.json"})
+        self.assertEqual(set(manifest[2]), {
+            "timestamp_manifest.json", "project_health_snapshot.json",
+            "project_user_roles_snapshot.json", "validation_report.json",
+        })
         self.assertIn(b"submission_edit", manifest[2]["timestamp_manifest.json"])
         self.assertIn(b'"chain": {\n    "status": "genesis"', manifest[2]["timestamp_manifest.json"])
         self.assertIn(b"<timestamp_manifest>timestamp_manifest.json</timestamp_manifest>", manifest[1])
         self.assertIn(b"<timestamp_token></timestamp_token>", manifest[1])
-        self.assertIn(b'<data id="sentinel_project_audit" version="1"', submission[1])
+        self.assertIn(b'<data id="sentinel_project_audit" version="5"', submission[1])
         self.assertIn(b"<orx:meta><orx:instanceID>", submission[1])
         self.assertEqual(submission[2], {})
-        certificate = [item for item in sink.submissions if b"<record_type>validation_certificate</record_type>" in item[1]][0]
-        expected_certificate = {"validation_report.json"}
-        if certificate[2].get("validation_certificate.pdf"):
-            expected_certificate.add("validation_certificate.pdf")
-        self.assertEqual(set(certificate[2]), expected_certificate)
-        self.assertIn(b'"status": "passed_with_warnings"', certificate[2]["validation_report.json"])
-        snapshot = [item for item in sink.submissions if b"<record_type>project_health_snapshot</record_type>" in item[1]][0]
-        expected_snapshot = {"platform_snapshot.json"}
-        if snapshot[2].get("platform_snapshot.pdf"):
-            expected_snapshot.add("platform_snapshot.pdf")
-        self.assertEqual(set(snapshot[2]), expected_snapshot)
-        self.assertIn(b'"retained_versions": 1', snapshot[2]["platform_snapshot.json"])
-        users = [item for item in sink.submissions
-                 if b"<record_type>project_user_roles_snapshot</record_type>" in item[1]][0]
-        self.assertIn(b'project_user_roles_snapshot.v1', users[2]["platform_snapshot.json"])
+        self.assertIn(b"<project_health_snapshot>project_health_snapshot.json</project_health_snapshot>", manifest[1])
+        self.assertIn(b"<project_user_roles_snapshot>project_user_roles_snapshot.json</project_user_roles_snapshot>", manifest[1])
+        self.assertIn(b"<validation_report>validation_report.json</validation_report>", manifest[1])
+        self.assertIn(b'"retained_versions": 1', manifest[2]["project_health_snapshot.json"])
+        self.assertIn(b'project_user_roles_snapshot.v1', manifest[2]["project_user_roles_snapshot.json"])
+        self.assertIn(b'"status": "passed_with_warnings"', manifest[2]["validation_report.json"])
 
 
 if __name__ == "__main__":
