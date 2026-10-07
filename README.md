@@ -129,6 +129,36 @@ counts, retained-version counts and latest submission times. Host-wide metrics
 such as disk space, uptime, CPU, memory and backups require separately
 privileged Admin Sentinel.
 
+### Output files
+
+The normal run keeps the authoritative evidence in the configured Central audit
+form. The following filenames are used as attachment fields on the consolidated
+`sentinel_run_qa_snapshot` row:
+
+| File | Contents |
+|---|---|
+| `timestamp_manifest.json` | Run manifest listing records processed, hashes, run identity, chain reference and timestamp status. |
+| `timestamp_token.tsr` | RFC3161 timestamp response when the preferred TSA is available. |
+| `timestamp_certificate.pem` | TSA certificate extracted from the timestamp response, when available. |
+| `project_health_snapshot.json` | Detailed machine-readable project/API inventory: forms, versions, submissions, drafts, assignments, links, scope and chain reconciliation. |
+| `sentinel_qa_summary.pdf` | Human-readable daily project overview covering progress, governance, validation status and actions. |
+| `project_user_roles_snapshot.json` | Current project users, account types, actor IDs, roles, assignments and permission visibility. |
+| `project_user_roles_snapshot.pdf` | Human-readable user and role report. |
+| `validation_report.json` | Machine-readable automated validation results and check details. |
+| `validation_certificate.pdf` | Human-readable validation certificate with pass, warning and failure results. |
+| `evidence_package.zip` | Raw validation/API evidence and an SHA-256 evidence manifest. |
+| `source_form_definition.xml` | Exact deployed XForm XML for a source-form version. Attached to the corresponding form-version audit row. |
+| `source_form_definition.xlsx` | Original XLSForm workbook retained by Central, when available. Attached to the corresponding form-version audit row. |
+
+The privileged monthly Admin Sentinel run adds `admin_platform_snapshot.json`,
+`admin_platform_snapshot.pdf` and its evidence package. These contain the
+administrator-visible Central audit window and optional host-health snapshot;
+they are not produced by the ordinary project-scoped account.
+
+The local validation command writes the same core validation artifacts under
+`.sentinel-local/validation/`. The local copies are working outputs; the
+Central-attached copies are the retained audit evidence.
+
 ## Failure and recovery behavior
 
 Sentinel is designed to degrade safely. With the default preferred timestamp
