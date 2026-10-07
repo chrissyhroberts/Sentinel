@@ -214,7 +214,7 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(summary.forms_seen, 1)
         self.assertEqual(summary.versions_submitted, 1)
         self.assertEqual(summary.form_versions_submitted, 1)
-        self.assertEqual(len(sink.submissions), 6)
+        self.assertEqual(len(sink.submissions), 7)
         submission = [item for item in sink.submissions if b"linked_collect_audit" in item[1]][0]
         self.assertIn(b"<record_type>submission_edit</record_type>", submission[1])
         self.assertIn(b"<central_actor_id>user@example.org</central_actor_id>", submission[1])
@@ -240,6 +240,9 @@ class CrawlerTests(unittest.TestCase):
             expected_snapshot.add("platform_snapshot.pdf")
         self.assertEqual(set(snapshot[2]), expected_snapshot)
         self.assertIn(b'"retained_versions": 1', snapshot[2]["platform_snapshot.json"])
+        users = [item for item in sink.submissions
+                 if b"<record_type>project_user_roles_snapshot</record_type>" in item[1]][0]
+        self.assertIn(b'project_user_roles_snapshot.v1', users[2]["platform_snapshot.json"])
 
 
 if __name__ == "__main__":

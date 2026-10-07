@@ -164,6 +164,16 @@ class ProjectAuditor:
             "source_version_id": run_id,
             "source_content_sha256": snapshot_fields["source_content_sha256"],
         })
+        users_fields = self._submit_user_roles_snapshot(run_id)
+        run_records.append({
+            "audit_instance_id": users_fields["source_audit_instance_id"],
+            "record_type": users_fields["record_type"],
+            "status": "submitted",
+            "source_form_id": "",
+            "source_instance_id": "",
+            "source_version_id": run_id,
+            "source_content_sha256": users_fields["source_content_sha256"],
+        })
         checkpoint_id = checkpoint_instance_id(self.project_id)
         if checkpoint_id not in completed:
             self._submit_checkpoint(forms_seen=seen, versions_seen=submitted + skipped, run_id=run_id)
@@ -298,6 +308,95 @@ class ProjectAuditor:
             snapshot_attachments,
         )
         return fields
+
+    def _submit_user_roles_snapshot(self, run_id: str) -> dict[str, str]:
+        inventory = self._project_user_inventory()
+        snapshot = {
+            "schema": "methodmesh.sentinel.project_user_roles_snapshot.v1",
+            "project_id": self.project_id,
+            "run_id": run_id,
+            "observed_at": inventory["observed_at"],
+            "inventory": inventory,
+            "safety": "Project-visible user and role metadata only; no source data copied.",
+        }
+        snapshot_bytes = (json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
+        snapshot_pdf = _json_document_pdf(snapshot, "Sentinel project user and role snapshot")
+        audit_id = audit_instance_id(self.project_id, "project-users", run_id, run_id)
+        fields = {
+            "record_type": "project_user_roles_snapshot",
+            "project_id": self.project_id,
+            "source_form_id": "",
+            "source_instance_id": "",
+            "source_version_id": run_id,
+            "source_audit_instance_id": audit_id,
+            "source_content_sha256": _sha(snapshot_bytes),
+            "collect_audit_sha256": "",
+            "central_created_at": snapshot["observed_at"],
+            "central_actor_id": "",
+            "change_reason": "Project user and role snapshot",
+            "reason_link_status": "sentinel_project_observation",
+            "timestamp_status": "covered_by_run_manifest",
+            "timestamp_time": "",
+            "timestamp_batch_id": run_id,
+            "timestamp_batch_sha256": "",
+            "timestamp_manifest": "",
+            "timestamp_token": "",
+            "timestamp_token_sha256": "",
+            "timestamp_certificate": "",
+            "platform_snapshot": "platform_snapshot.json",
+            "platform_snapshot_pdf": "platform_snapshot.pdf" if snapshot_pdf else "",
+            "validation_report": "",
+            "validation_certificate": "",
+            "evidence_package": "",
+            "sentinel_run_id": run_id,
+            "checkpoint_cursor": "",
+        }
+        attachments = {"platform_snapshot.json": snapshot_bytes}
+        if snapshot_pdf:
+            attachments["platform_snapshot.pdf"] = snapshot_pdf
+        self.sink.submit(
+            self.client.config.audit_form_id,
+            _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
+                       self.client.config.audit_form_id),
+            attachments,
+        )
+        return fields
+
+    def _project_user_inventory(self) -> dict[str, Any]:
+        """Capture the regular account's current project users and roles."""
+        inventory: dict[str, Any] = {
+            "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "project_id": self.project_id,
+            "web_users": {"status": "unavailable", "items": []},
+            "roles": {"status": "unavailable", "items": []},
+            "project_assignments": {},
+        }
+        try:
+            inventory["web_users"] = {"status": "available", "items": self.client.users()}
+        except (AttributeError, CentralError) as error:
+            inventory["web_users"] = {"status": "unavailable", "error": type(error).__name__, "items": []}
+        try:
+            roles = self.client.roles()
+            inventory["roles"] = {"status": "available", "items": roles}
+        except (AttributeError, CentralError) as error:
+            roles = []
+            inventory["roles"] = {"status": "unavailable", "error": type(error).__name__, "items": []}
+        role_keys: list[str] = []
+        for role in roles:
+            key = role.get("system") or role.get("id") or role.get("name")
+            if key is not None:
+                role_keys.append(str(key))
+        for role_key in role_keys:
+            try:
+                inventory["project_assignments"][role_key] = {
+                    "status": "available",
+                    "items": self.client.project_assignments(self.project_id, role_key),
+                }
+            except (AttributeError, CentralError) as error:
+                inventory["project_assignments"][role_key] = {
+                    "status": "unavailable", "error": type(error).__name__, "items": [],
+                }
+        return inventory
 
     def _server_audit_start(self) -> str | None:
         configured = getattr(self.client.config, "server_audit_start", "")
@@ -577,6 +676,7 @@ class ProjectAuditor:
                 "run_timestamp_manifest": "The manifest for this Sentinel run",
                 "validation_certificate": "Automated checks for this Sentinel run",
                 "project_health_snapshot": "Project-level Central API health and inventory observation",
+                "project_user_roles_snapshot": "Project-visible Web User and role-assignment observation",
             },
             "records": records,
         }
@@ -626,8 +726,8 @@ class ProjectAuditor:
             _validation_check("source_scope_discovered", bool(plan.forms), "Configured source-form scope discovered"),
             _validation_check("deterministic_ids_unique", len(ids) == len(set(ids)), "No duplicate audit IDs in run"),
             _validation_check(
-                "run_reconciled", len(records) == len(plan.tasks) + 1,
-                "Every planned task and the project health snapshot has a run result",
+                "run_reconciled", len(records) == len(plan.tasks) + 2,
+                "Every planned task and both daily project snapshots have a run result",
             ),
             _validation_check(
                 "manifest_chain", previous.get("status") in {"genesis", "previous_manifest_verified"},
@@ -655,6 +755,7 @@ class ProjectAuditor:
                 "planned_records": len(plan.tasks),
                 "run_records": len(records),
                 "platform_snapshots": sum(record.get("record_type") == "project_health_snapshot" for record in records),
+                "user_role_snapshots": sum(record.get("record_type") == "project_user_roles_snapshot" for record in records),
                 "submitted": sum(record.get("status") == "submitted" for record in records),
                 "already_present": sum(record.get("status") == "already_present" for record in records),
             },

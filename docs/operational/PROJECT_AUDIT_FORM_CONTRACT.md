@@ -56,6 +56,7 @@ submission UUID; Sentinel does not copy it into the audit form.
 | `run_timestamp_manifest` | The manifest covering one Sentinel run |
 | `validation_certificate` | Automated validation and reconciliation results for one Sentinel run |
 | `project_health_snapshot` | Non-participant project/API inventory observed during one Sentinel run |
+| `project_user_roles_snapshot` | Project-visible Web User and role-assignment inventory observed during one Sentinel run |
 | `admin_platform_snapshot` | Privileged, time-scoped Central administration and platform snapshot |
 
 Each run also creates a `run_timestamp_manifest` record. Its
@@ -101,6 +102,13 @@ times. `platform_snapshot.pdf` is the corresponding human-readable copy. It
 does not claim to measure server disk space, uptime, CPU, memory,
 backups or other host-wide infrastructure; those metrics belong to a
 separately privileged Admin Sentinel.
+
+Each run also creates one `project_user_roles_snapshot` record. This is a
+separate daily line in the audit form containing the Web Users visible to the
+regular account, the available role definitions, and the current assignments
+for the configured project. If Central does not grant one of these reads, the
+snapshot records that limitation explicitly rather than treating the data as
+complete.
 
 An explicitly invoked Admin Sentinel run creates one
 `admin_platform_snapshot` record. It uses the existing `platform_snapshot`,

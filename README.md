@@ -56,6 +56,8 @@ For the configured project, one run records:
 - field-level edit diffs, actors and server timestamps;
 - Collect audit trails and version-linked change reasons where available;
 - a deterministic project checkpoint and timestamped run manifest.
+- a separate daily project user-and-role snapshot, subject to the regular
+  account's Central permissions;
 - an automated validation certificate containing the run's reconciliation,
   identity, chain and timestamp checks.
 

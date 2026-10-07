@@ -146,6 +146,13 @@ class CentralClient:
             extra_headers={"X-Extended-Metadata": "true"},
         ))
 
+    def users(self) -> list[dict[str, Any]]:
+        """Return Web Users visible to the authenticated Central account."""
+        return _items(self._request(
+            "GET", "/v1/users", accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
     def roles(self) -> list[dict[str, Any]]:
         return _items(self.get_json("/v1/roles"))
 
