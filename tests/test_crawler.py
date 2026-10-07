@@ -175,10 +175,16 @@ class CrawlerTests(unittest.TestCase):
         self.assertIn(b"<orx:meta><orx:instanceID>", submission[1])
         self.assertEqual(submission[2], {})
         certificate = [item for item in sink.submissions if b"<record_type>validation_certificate</record_type>" in item[1]][0]
-        self.assertEqual(set(certificate[2]), {"validation_certificate.json"})
-        self.assertIn(b'"status": "passed_with_warnings"', certificate[2]["validation_certificate.json"])
+        expected_certificate = {"validation_report.json"}
+        if certificate[2].get("validation_certificate.pdf"):
+            expected_certificate.add("validation_certificate.pdf")
+        self.assertEqual(set(certificate[2]), expected_certificate)
+        self.assertIn(b'"status": "passed_with_warnings"', certificate[2]["validation_report.json"])
         snapshot = [item for item in sink.submissions if b"<record_type>project_health_snapshot</record_type>" in item[1]][0]
-        self.assertEqual(set(snapshot[2]), {"platform_snapshot.json"})
+        expected_snapshot = {"platform_snapshot.json"}
+        if snapshot[2].get("platform_snapshot.pdf"):
+            expected_snapshot.add("platform_snapshot.pdf")
+        self.assertEqual(set(snapshot[2]), expected_snapshot)
         self.assertIn(b'"retained_versions": 1', snapshot[2]["platform_snapshot.json"])
 
 

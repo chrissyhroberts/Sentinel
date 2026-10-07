@@ -5,15 +5,28 @@ same Sentinel code and the same audit form can be used on any Central install;
 only Central connection settings, the project allowlist, and the published
 audit-form identifier are configuration.
 
-The current universal form is [audit_001_v2.xlsx](../odk_forms/audit/audit_001_v2.xlsx).
+The current universal form is [audit_001_v3.xlsx](../odk_forms/audit/audit_001_v3.xlsx).
 Publish it once in each audited project. Sentinel needs read permission on the
 project's source forms and submit permission on this audit form. It never edits
 or deletes source submissions.
 
-When version 2 is published, set `audit_form_id` and `audit_form_version` in
-the local Sentinel configuration. Version 2 contains the ledger fields and batch
-timestamp fields, including the RFC3161 token upload. It does not contain a
-source-data bundle field.
+When version 3 is published, set `audit_form_id` and `audit_form_version` in
+the local Sentinel configuration. Version 3 contains the ledger fields and
+batch timestamp fields, including the RFC3161 token upload, plus dedicated
+JSON/PDF fields for platform snapshots and validation certificates. It does
+not contain a source-data bundle field.
+
+The dedicated evidence attachment fields are:
+
+| Form field | Filename | Purpose |
+|---|---|---|
+| `timestamp_manifest` | `timestamp_manifest.json` | Run manifest |
+| `timestamp_token` | `timestamp_token.tsr` | RFC3161 timestamp token |
+| `timestamp_certificate` | `timestamp_certificate.pem` | TSA certificate |
+| `platform_snapshot` | `platform_snapshot.json` | Machine-readable health snapshot |
+| `platform_snapshot_pdf` | `platform_snapshot.pdf` | Human-readable health snapshot |
+| `validation_report` | `validation_report.json` | Machine-readable validation report |
+| `validation_certificate` | `validation_certificate.pdf` | Human-readable validation certificate |
 
 ## One project-level ledger
 
@@ -58,8 +71,9 @@ intermediate manifest. It is deliberately not a `previous_attestation_hash`
 chain on every source record.
 
 Every run also creates a `validation_certificate` record. Its
-`validation_certificate.json` attachment contains the checks performed during
-the run, including deterministic-ID uniqueness, planned-versus-processed
+`validation_report.json` attachment contains the checks performed during the
+run, and `validation_certificate.pdf` is the human-readable review copy. The
+report includes deterministic-ID uniqueness, planned-versus-processed
 reconciliation, manifest-chain status and timestamp status. The certificate
 has its own hash and timestamp evidence.
 
@@ -74,7 +88,8 @@ Each run also creates one `project_health_snapshot` record. Its
 `platform_snapshot.json` attachment records project metadata and the
 project-account-visible inventory of source forms, published form versions,
 submission counts, retained submission-version counts and latest submission
-times. It does not claim to measure server disk space, uptime, CPU, memory,
+times. `platform_snapshot.pdf` is the corresponding human-readable copy. It
+does not claim to measure server disk space, uptime, CPU, memory,
 backups or other host-wide infrastructure; those metrics belong to a
 separately privileged Admin Sentinel.
 

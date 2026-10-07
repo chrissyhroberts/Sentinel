@@ -257,6 +257,7 @@ class ProjectAuditor:
             "server_audit_enabled": bool(getattr(self.client.config, "server_audit_enabled", False)),
         }
         snapshot_bytes = (json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
+        snapshot_pdf = _json_document_pdf(snapshot, "Sentinel project health snapshot")
         audit_id = audit_instance_id(self.project_id, "project-health", run_id, run_id)
         fields = {
             "record_type": "project_health_snapshot",
@@ -275,18 +276,25 @@ class ProjectAuditor:
             "timestamp_time": "",
             "timestamp_batch_id": run_id,
             "timestamp_batch_sha256": "",
-            "timestamp_manifest": "platform_snapshot.json",
+            "timestamp_manifest": "",
             "timestamp_token": "",
             "timestamp_token_sha256": "",
             "timestamp_certificate": "",
+            "platform_snapshot": "platform_snapshot.json",
+            "platform_snapshot_pdf": "platform_snapshot.pdf" if snapshot_pdf else "",
+            "validation_report": "",
+            "validation_certificate": "",
             "sentinel_run_id": run_id,
             "checkpoint_cursor": str(len(plan.tasks)),
         }
+        snapshot_attachments = {"platform_snapshot.json": snapshot_bytes}
+        if snapshot_pdf:
+            snapshot_attachments["platform_snapshot.pdf"] = snapshot_pdf
         self.sink.submit(
             self.client.config.audit_form_id,
             _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
                        self.client.config.audit_form_id),
-            {"platform_snapshot.json": snapshot_bytes},
+            snapshot_attachments,
         )
         return fields
 
@@ -657,6 +665,7 @@ class ProjectAuditor:
         }
         certificate_bytes = (json.dumps(certificate, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
         evidence = self._timestamp_manifest(certificate_bytes)
+        certificate_pdf = _json_document_pdf(certificate, "Sentinel validation certificate")
         audit_id = audit_instance_id(self.project_id, "validation-certificate", run_id, run_id)
         fields = {
             "record_type": "validation_certificate",
@@ -675,20 +684,29 @@ class ProjectAuditor:
             "timestamp_time": evidence.time,
             "timestamp_batch_id": run_id,
             "timestamp_batch_sha256": _sha(certificate_bytes),
-            "timestamp_manifest": "validation_certificate.json",
+            "timestamp_manifest": "",
             "timestamp_token": "timestamp_token.tsr" if evidence.token else "",
             "timestamp_token_sha256": _sha(evidence.token) if evidence.token else "",
             "timestamp_certificate": "timestamp_certificate.pem" if evidence.certificate else "",
+            "platform_snapshot": "",
+            "platform_snapshot_pdf": "",
+            "validation_report": "validation_report.json",
+            "validation_certificate": "validation_certificate.pdf" if certificate_pdf else "",
             "sentinel_run_id": run_id,
             "checkpoint_cursor": str(len(records)),
         }
+        certificate_attachments = {"validation_report.json": certificate_bytes}
+        if certificate_pdf:
+            certificate_attachments["validation_certificate.pdf"] = certificate_pdf
+        if evidence.token:
+            certificate_attachments["timestamp_token.tsr"] = evidence.token
+        if evidence.certificate:
+            certificate_attachments["timestamp_certificate.pem"] = evidence.certificate
         self.sink.submit(
             self.client.config.audit_form_id,
             _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
                        self.client.config.audit_form_id),
-            {"validation_certificate.json": certificate_bytes,
-             **({"timestamp_token.tsr": evidence.token} if evidence.token else {}),
-             **({"timestamp_certificate.pem": evidence.certificate} if evidence.certificate else {})},
+            certificate_attachments,
         )
 
     def _timestamp_manifest(self, manifest: bytes) -> TimestampEvidence:
@@ -731,6 +749,33 @@ def _xml_safe(value: Any) -> str:
         or 0xE000 <= ord(character) <= 0xFFFD
         or 0x10000 <= ord(character) <= 0x10FFFF
     )
+
+
+def _json_document_pdf(document: dict[str, Any], title: str) -> bytes:
+    """Render a compact human-readable PDF companion for a JSON evidence file."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+    except ModuleNotFoundError:
+        return b""
+    from io import BytesIO
+
+    buffer = BytesIO()
+    styles = getSampleStyleSheet()
+    body = styles["BodyText"]
+    body.fontName = "Helvetica"
+    body.fontSize = 8
+    body.leading = 10
+    story: list[Any] = [Paragraph(title, styles["Title"]), Spacer(1, 6 * mm)]
+    for key, value in document.items():
+        rendered = json.dumps(value, ensure_ascii=False, sort_keys=True) if isinstance(value, (dict, list)) else str(value)
+        story.append(Paragraph(f"<b>{escape(str(key))}</b>: {escape(rendered)}", body))
+        story.append(Spacer(1, 1.5 * mm))
+    SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
+                      topMargin=15 * mm, bottomMargin=15 * mm).build(story)
+    return buffer.getvalue()
 
 
 def _sha(value: bytes) -> str:

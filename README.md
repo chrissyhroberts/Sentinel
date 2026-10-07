@@ -37,7 +37,7 @@ Operational procedures are in [docs/operational](docs/operational/). The
 risk-based validation checklist and workflow are in
 [docs/validation](docs/validation/).
 
-The current test form is `audit_001`, version 2. The form ID and version are
+The current test form is `audit_001`, version 3. The form ID and version are
 configuration values, so the same code can be used with a universal audit form
 on another Central installation.
 
@@ -87,13 +87,16 @@ Completed records are not rewritten. A subsequent run skips an existing
 deterministic record and only submits new source versions or new enabled audit
 events.
 
-Each run also submits a `validation_certificate` record. Its JSON attachment
-contains the automated check results and is independently timestamped using
-the same preferred/required policy. A certificate with warnings is still
-preserved for review; a required timestamp failure stops the run.
+Each run also submits a `validation_certificate` record. Its
+`validation_report.json` attachment contains the automated check results and
+its `validation_certificate.pdf` attachment is the human-readable copy. The
+JSON is independently timestamped using the same preferred/required policy. A
+certificate with warnings is still preserved for review; a required timestamp
+failure stops the run.
 
 Each run also submits a `project_health_snapshot` record with a
-`platform_snapshot.json` attachment. It captures project-account-visible
+`platform_snapshot.json` and `platform_snapshot.pdf` attachments. They capture
+project-account-visible
 Central observations such as project metadata, source-form inventory, form
 version counts, submission counts, retained-version counts and latest
 submission times. It deliberately excludes host-wide metrics such as disk
@@ -165,8 +168,8 @@ edit. The JSON report and PDF certificate are written to the same validation
 output directory as the read-only review.
 
 The active report is also submitted to the configured audit form as a
-`validation_certificate` record, with `validation_report.json` and—when PDF
-generation is available—`validation_certificate.pdf` attached. The command
+`validation_certificate` record, with `validation_report.json` and, when PDF
+generation is available, `validation_certificate.pdf` attached. The command
 prints the resulting audit record ID.
 
 The active run uses synthetic validation data only. It does not open, edit or
