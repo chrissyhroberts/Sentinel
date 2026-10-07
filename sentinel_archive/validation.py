@@ -33,6 +33,10 @@ def validate_plan(client: Any, plan: AuditPlan) -> dict[str, Any]:
     """Return a JSON-safe validation report without changing Central."""
     config = client.config
     checks: list[ValidationCheck] = []
+    run_id = "read-only-" + uuid.uuid4().hex[:16]
+    evidence: dict[str, Any] = {}
+    project: dict[str, Any] = {}
+    audit_submissions: list[dict[str, Any]] = []
 
     def add(check_id: str, component: str, mode: str, passed: bool, detail: str) -> None:
         checks.append(ValidationCheck(check_id, component, mode, "pass" if passed else "fail", detail))
@@ -41,6 +45,7 @@ def validate_plan(client: Any, plan: AuditPlan) -> dict[str, Any]:
         f"Project {config.project_id!r} is explicitly configured")
     try:
         project = client.project()
+        evidence["central/project.json"] = project
         add("central_project_metadata", "ODK Central", "automated", bool(project.get("id")),
             "Project metadata is readable through the Central API")
     except Exception as error:
@@ -63,9 +68,14 @@ def validate_plan(client: Any, plan: AuditPlan) -> dict[str, Any]:
     form_definition_tasks = [task for task in plan.tasks if task[0] == "form_version"]
     try:
         readable = 0
-        for _kind, form_id, _logical_id, version_id, _metadata in form_definition_tasks:
-            if client.form_version_bytes(form_id, version_id, "xml"):
+        form_definition_metadata: list[dict[str, Any]] = []
+        for _kind, form_id, _logical_id, version_id, metadata in form_definition_tasks:
+            definition = client.form_version_bytes(form_id, version_id, "xml")
+            if definition:
                 readable += 1
+                evidence[f"central/form_definitions/{_safe_filename(form_id)}_{_safe_filename(version_id)}.xml"] = definition
+            form_definition_metadata.append({"form_id": form_id, "version_id": version_id, "metadata": metadata})
+        evidence["central/form_definitions.json"] = form_definition_metadata
         add("central_form_definitions_readable", "ODK Central", "automated",
             readable == len(form_definition_tasks),
             f"Read {readable}/{len(form_definition_tasks)} discovered form definition XML file(s)")
@@ -81,11 +91,11 @@ def validate_plan(client: Any, plan: AuditPlan) -> dict[str, Any]:
         len(validation_form_ids) == len(set(validation_form_ids))
         and not set(validation_form_ids).intersection(form_ids + [str(config.audit_form_id)]),
         "Configured validation forms are unique and excluded from source scope")
-    audit_ids = [audit_instance_id(config.project_id, task[1], task[2], task[3]) for task in plan.tasks]
+    planned_audit_ids = [audit_instance_id(config.project_id, task[1], task[2], task[3]) for task in plan.tasks]
     add("sentinel_deterministic_ids", "Sentinel", "automated",
-        len(audit_ids) == len(set(audit_ids)), "All discovered source tasks have unique deterministic audit IDs")
+        len(planned_audit_ids) == len(set(planned_audit_ids)), "All discovered source tasks have unique deterministic audit IDs")
     add("sentinel_id_length", "Sentinel", "automated",
-        all(len(audit_id) <= 64 for audit_id in audit_ids), "Generated audit IDs fit Central's instance ID limit")
+        all(len(audit_id) <= 64 for audit_id in planned_audit_ids), "Generated audit IDs fit Central's instance ID limit")
     add("sentinel_timestamp_policy", "Sentinel", "automated",
         str(getattr(config, "timestamp_policy", "preferred")).lower() in {"disabled", "preferred", "required"},
         f"Timestamp policy is {getattr(config, 'timestamp_policy', 'preferred')!r}")
@@ -95,6 +105,7 @@ def validate_plan(client: Any, plan: AuditPlan) -> dict[str, Any]:
 
     try:
         audit_submissions = client.submissions(config.audit_form_id)
+        evidence["central/audit_submissions.json"] = audit_submissions
         audit_ids = [str(item.get("instanceId") or item.get("id") or "") for item in audit_submissions]
         audit_ids = [value for value in audit_ids if value]
         add("central_audit_read", "ODK Central", "automated", True,
@@ -106,9 +117,45 @@ def validate_plan(client: Any, plan: AuditPlan) -> dict[str, Any]:
             f"Could not read audit form: {type(error).__name__}")
 
     failures = sum(check.status == "fail" for check in checks)
+    evidence["central/forms.json"] = plan.forms
+    evidence["sentinel/plan.json"] = {
+        "project_id": str(config.project_id),
+        "task_count": len(plan.tasks),
+        "task_keys": task_ids,
+        "audit_ids": planned_audit_ids,
+        "existing_audit_ids": sorted(str(value) for value in plan.existing_audit_ids),
+    }
+    evidence["sentinel/config_scope.json"] = {
+        "project_id": str(config.project_id),
+        "audit_form_id": str(config.audit_form_id),
+        "audit_form_version": str(getattr(config, "audit_form_version", "")),
+        "validation_form_ids": list(validation_form_ids),
+        "timestamp_policy": str(getattr(config, "timestamp_policy", "preferred")),
+        "server_audit_enabled": bool(getattr(config, "server_audit_enabled", False)),
+    }
+    evidence_root = f"evidence_{run_id}"
+    evidence_refs = {
+        "central_project_scope": f"{evidence_root}/sentinel/config_scope.json",
+        "central_project_metadata": f"{evidence_root}/central/project.json",
+        "central_audit_form": f"{evidence_root}/sentinel/config_scope.json",
+        "central_source_scope": f"{evidence_root}/central/forms.json",
+        "central_form_ids_unique": f"{evidence_root}/central/forms.json",
+        "central_source_identifiers_present": f"{evidence_root}/sentinel/plan.json",
+        "central_source_versions": f"{evidence_root}/sentinel/plan.json",
+        "central_form_definitions_readable": f"{evidence_root}/central/form_definitions.json",
+        "sentinel_task_ids_unique": f"{evidence_root}/sentinel/plan.json",
+        "sentinel_validation_scope": f"{evidence_root}/sentinel/config_scope.json",
+        "sentinel_deterministic_ids": f"{evidence_root}/sentinel/plan.json",
+        "sentinel_id_length": f"{evidence_root}/sentinel/plan.json",
+        "sentinel_timestamp_policy": f"{evidence_root}/sentinel/config_scope.json",
+        "sentinel_server_audit_scope": f"{evidence_root}/sentinel/config_scope.json",
+        "central_audit_read": f"{evidence_root}/central/audit_submissions.json",
+        "sentinel_audit_ids_unique": f"{evidence_root}/central/audit_submissions.json",
+    }
     report = {
         "schema": "methodmesh.sentinel.validation_report.v1",
         "project_id": str(config.project_id),
+        "validation_run_id": run_id,
         "components": ["ODK Central", "ODK Collect", "Enketo", "MethodMesh", "Sentinel"],
         "mode": "read_only",
         "status": "failed" if failures else "passed",
@@ -116,7 +163,8 @@ def validate_plan(client: Any, plan: AuditPlan) -> dict[str, Any]:
         "checks": [asdict(check) for check in checks],
     }
     for check in report["checks"]:
-        check["evidence_ref"] = "validation_report.json"
+        check["evidence_ref"] = evidence_refs.get(check["check_id"], f"{evidence_root}/sentinel/plan.json")
+    report["_evidence"] = evidence
     return report
 
 
@@ -169,6 +217,12 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         })
 
     try:
+        form_versions = client.form_versions(form_id)
+        form_version_id = str(form_versions[0].get("version") or form_versions[0].get("id") or "") if form_versions else ""
+        form_definition = client.form_version_bytes(form_id, form_version_id, "xml") if form_version_id else b""
+        add("central_active_form_definition", bool(form_definition),
+            f"Read the active validation form definition ({form_version_id or 'no version'})")
+
         created = client.create_validation_submission(form_id, initial_xml, device_id=device_id)
         logical_id = str(created.get("instanceId") or initial_id)
         created_xml = client.submission_xml(form_id, logical_id)
@@ -186,28 +240,57 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         current_xml = client.submission_xml(form_id, logical_id)
         current_root = ET.fromstring(current_xml)
         current_value = _xml_field(current_root, "test_value")
+        submission_metadata = client.submission(form_id, logical_id)
         diffs = client.diffs(form_id, logical_id)
         audits = client.audits(form_id, logical_id)
+        comments = client.comments(form_id, logical_id)
         diff_text = json.dumps(diffs, sort_keys=True)
         audit_text = json.dumps(audits, sort_keys=True)
+        version_ids = [str(item.get("instanceId") or item.get("versionId") or item.get("id") or "")
+                       for item in versions]
+        original_version_xml = client.version_xml(form_id, logical_id, version_ids[0]) if version_ids else b""
+        attachment_inventory = client.version_attachments(form_id, logical_id, version_ids[-1]) if version_ids else []
         add("central_active_edit", current_value == "CENTRAL-B" and len(versions) >= 2,
             f"Retrieved edited value and {len(versions)} retained submission versions")
         add("central_active_version_records", len(versions) >= 2 and all(isinstance(item, dict) for item in versions),
             "Central returned structured records for the original and edited versions")
+        add("central_active_version_identity", all(version_ids) and len(version_ids) == len(set(version_ids)),
+            "Retained Central versions have distinct identifiers")
+        original_root = ET.fromstring(original_version_xml)
+        add("central_active_original_version_readback", _xml_field(original_root, "test_value") == "CENTRAL-A",
+            "The original retained version can be retrieved independently from the current submission")
+        add("central_active_attachment_inventory", isinstance(attachment_inventory, list),
+            "Central attachment inventory was readable for the retained edited version")
         add("central_active_diff", "CENTRAL-A" in diff_text and "CENTRAL-B" in diff_text,
             "Central diff evidence contains the expected old and new values")
+        add("central_active_diff_structure", isinstance(diffs, (dict, list))
+            and "CENTRAL-A" in diff_text and "CENTRAL-B" in diff_text,
+            "Central returned structured field-level difference evidence")
         add("central_active_reason", "Controlled Sentinel validation edit" in _xml_field(current_root, "change_reason")
             or "Controlled Sentinel validation" in audit_text,
             "The controlled edit reason is present in the submission or Central audit evidence")
         audit_actions = audit_text.lower()
         add("central_active_audit_trail", bool(audits) and ("update" in audit_actions or "edit" in audit_actions),
             "Central returned an audit-trail event for the synthetic edit")
+        add("central_active_actor_attribution", bool(audits)
+            and any(key in audit_text.lower() for key in ("actor", "actorid", "user")),
+            "Central audit evidence includes an actor or user attribution")
+        add("central_active_metadata_read", isinstance(submission_metadata, dict) and bool(submission_metadata),
+            "Central submission metadata was readable for the edited record")
+        add("central_active_comments_read", isinstance(comments, list),
+            "Central comments endpoint was readable for the edited record")
         add("central_active_submission_identity",
             _xml_field(created_root, "validation_run_id") == run_id
             and _xml_field(current_root, "validation_run_id") == run_id,
             "The retrieved original and edited XML belong to this validation run")
+        add("central_active_xml_well_formed", bool(ET.tostring(created_root)) and bool(ET.tostring(current_root)),
+            "Both original and edited submission XML documents are well formed")
         add("sentinel_active_hash_change", initial_hash != _sha(current_xml),
             "Sentinel can distinguish the original and edited XML byte hashes")
+        deterministic_id = audit_instance_id(str(client.config.project_id), "active-validation", run_id, run_id)
+        add("sentinel_active_deterministic_id", deterministic_id == audit_instance_id(
+            str(client.config.project_id), "active-validation", run_id, run_id),
+            "The active validation audit ID is deterministic for this run")
         add("sentinel_active_evidence_capture",
             bool(created_xml and current_xml and versions and diffs is not None and audits is not None),
             "Raw XML, versions, diffs and audit evidence were captured for the package")
@@ -220,16 +303,53 @@ def run_active_validation(client: Any) -> dict[str, Any]:
 
     failures = sum(check["status"] == "fail" for check in checks)
     evidence = {
+        "central/form_versions.json": form_versions if "form_versions" in locals() else [],
+        "central/form_definition.xml": form_definition if "form_definition" in locals() else b"",
+        "central/validation_scope.json": {
+            "validation_form_id": form_id,
+            "configured_validation_form_ids": list(getattr(client.config, "validation_form_ids", ())),
+            "audit_form_id": str(client.config.audit_form_id),
+            "synthetic_only": True,
+        },
         "central/created_submission.xml": created_xml if "created_xml" in locals() else "",
+        "central/original_version.xml": original_version_xml if "original_version_xml" in locals() else b"",
         "central/edited_submission.xml": current_xml if "current_xml" in locals() else "",
+        "central/submission_metadata.json": submission_metadata if "submission_metadata" in locals() else {},
         "central/versions.json": versions if "versions" in locals() else [],
         "central/diffs.json": diffs if "diffs" in locals() else {},
         "central/audits.json": audits if "audits" in locals() else [],
+        "central/comments.json": comments if "comments" in locals() else [],
+        "central/attachment_inventory.json": attachment_inventory if "attachment_inventory" in locals() else [],
         "central/hashes.json": {
             "original_sha256": initial_hash if "initial_hash" in locals() else "",
             "edited_sha256": _sha(current_xml) if "current_xml" in locals() else "",
         },
     }
+    evidence_root = f"evidence_{run_id}"
+    evidence_refs = {
+        "central_active_create": f"{evidence_root}/central/created_submission.xml",
+        "central_active_form_definition": f"{evidence_root}/central/form_definition.xml",
+        "central_active_edit": f"{evidence_root}/central/edited_submission.xml",
+        "central_active_version_records": f"{evidence_root}/central/versions.json",
+        "central_active_version_identity": f"{evidence_root}/central/versions.json",
+        "central_active_original_version_readback": f"{evidence_root}/central/original_version.xml",
+        "central_active_attachment_inventory": f"{evidence_root}/central/attachment_inventory.json",
+        "central_active_diff": f"{evidence_root}/central/diffs.json",
+        "central_active_diff_structure": f"{evidence_root}/central/diffs.json",
+        "central_active_reason": f"{evidence_root}/central/audits.json",
+        "central_active_audit_trail": f"{evidence_root}/central/audits.json",
+        "central_active_actor_attribution": f"{evidence_root}/central/audits.json",
+        "central_active_metadata_read": f"{evidence_root}/central/submission_metadata.json",
+        "central_active_comments_read": f"{evidence_root}/central/comments.json",
+        "central_active_submission_identity": f"{evidence_root}/central/edited_submission.xml",
+        "central_active_xml_well_formed": f"{evidence_root}/central/created_submission.xml",
+        "sentinel_active_hash_change": f"{evidence_root}/central/hashes.json",
+        "sentinel_active_deterministic_id": f"{evidence_root}/central/validation_scope.json",
+        "sentinel_active_evidence_capture": f"{evidence_root}/evidence_manifest.json",
+        "sentinel_active_synthetic_scope": f"{evidence_root}/central/validation_scope.json",
+    }
+    for check in checks:
+        check["evidence_ref"] = evidence_refs.get(check["check_id"], f"{evidence_root}/evidence_manifest.json")
     return {
         "schema": "methodmesh.sentinel.validation_report.v1",
         "project_id": str(client.config.project_id),
@@ -328,6 +448,10 @@ def _xml_field(root: ET.Element, name: str) -> str:
     return ""
 
 
+def _safe_filename(value: Any) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(value)) or "unnamed"
+
+
 def write_validation_artifacts(report: dict[str, Any], output_dir: str | Path) -> dict[str, str]:
     """Write JSON, PDF and a hashed ZIP evidence package."""
     destination = Path(output_dir)
@@ -361,7 +485,9 @@ def write_validation_artifacts(report: dict[str, Any], output_dir: str | Path) -
     for relative, value in evidence.items():
         target = evidence_dir / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(value, (dict, list)):
+        if isinstance(value, bytes):
+            target.write_bytes(value)
+        elif isinstance(value, (dict, list)):
             target.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         else:
             target.write_text(str(value), encoding="utf-8")

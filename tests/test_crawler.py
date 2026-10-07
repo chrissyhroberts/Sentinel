@@ -1,6 +1,7 @@
 import json
 import unittest
 import zipfile
+from pathlib import Path
 
 from sentinel_archive.crawler import ProjectAuditor
 from sentinel_archive.validation import (run_active_validation,
@@ -96,8 +97,26 @@ class ActiveFakeClient:
         self.updated = True
         return {"instanceId": "uuid:active-fake-edited"}
 
+    def form_versions(self, form_id):
+        return [{"version": "1"}]
+
+    def form_version_bytes(self, form_id, version, extension):
+        return b"<h:html xmlns:h='http://www.w3.org/1999/xhtml'/>"
+
+    def submission(self, form_id, instance_id):
+        return {"instanceId": instance_id, "updatedAt": "2026-10-05T10:00:00Z"}
+
+    def comments(self, form_id, instance_id):
+        return []
+
     def submission_xml(self, form_id, instance_id):
         return self.current
+
+    def version_xml(self, form_id, instance_id, version_id):
+        return self.initial if version_id == "uuid:active-fake" else self.current
+
+    def version_attachments(self, form_id, instance_id, version_id):
+        return []
 
     def versions(self, form_id, instance_id):
         if not self.updated:
@@ -109,7 +128,8 @@ class ActiveFakeClient:
 
     def audits(self, form_id, instance_id):
         return [{"action": "submission.update", "details": {
-            "actionNotes": "Sentinel validation changed test_value from CENTRAL-A to CENTRAL-B"
+            "actionNotes": "Sentinel validation changed test_value from CENTRAL-A to CENTRAL-B",
+            "actorId": "validation-user",
         }}]
 
     def submit(self, form_id, xml, attachments):
@@ -121,14 +141,20 @@ class CrawlerTests(unittest.TestCase):
         client = ActiveFakeClient()
         report = run_active_validation(client)
         self.assertEqual(report["status"], "passed")
-        self.assertEqual(report["summary"], {"checks": 10, "passed": 10, "failed": 0})
+        self.assertEqual(report["summary"], {"checks": 20, "passed": 20, "failed": 0})
         self.assertEqual(report["mode"], "active_synthetic_validation")
+        self.assertTrue(all(check["evidence_ref"].startswith("evidence_") for check in report["checks"]))
         self.assertEqual(
             {check["check_id"] for check in report["checks"]},
             {
-                "central_active_create", "central_active_edit", "central_active_version_records",
-                "central_active_diff", "central_active_reason", "central_active_audit_trail",
-                "central_active_submission_identity", "sentinel_active_hash_change",
+                "central_active_create", "central_active_form_definition", "central_active_edit",
+                "central_active_version_records", "central_active_version_identity",
+                "central_active_original_version_readback", "central_active_attachment_inventory",
+                "central_active_diff", "central_active_diff_structure", "central_active_reason",
+                "central_active_audit_trail", "central_active_actor_attribution",
+                "central_active_metadata_read", "central_active_comments_read",
+                "central_active_submission_identity", "central_active_xml_well_formed",
+                "sentinel_active_hash_change", "sentinel_active_deterministic_id",
                 "sentinel_active_evidence_capture", "sentinel_active_synthetic_scope",
             },
         )
@@ -147,7 +173,9 @@ class CrawlerTests(unittest.TestCase):
                 with zipfile.ZipFile(artifacts["evidence_package"]) as package:
                     members = set(package.namelist())
                 self.assertTrue(any(name.endswith("/evidence_manifest.json") for name in members))
+                self.assertTrue(any(name.endswith("/central/form_definition.xml") for name in members))
                 self.assertTrue(any(name.endswith("/central/created_submission.xml") for name in members))
+                self.assertTrue(any(name.endswith("/central/original_version.xml") for name in members))
                 self.assertTrue(any(name.endswith("/central/diffs.json") for name in members))
 
     def test_read_only_validation_separates_central_and_sentinel_checks(self):
@@ -158,6 +186,17 @@ class CrawlerTests(unittest.TestCase):
         self.assertIn("ODK Central", report["components"])
         self.assertIn("Sentinel", report["components"])
         self.assertTrue(all(check["status"] == "pass" for check in report["checks"]))
+        with self.subTest("read-only evidence package"):
+            from tempfile import TemporaryDirectory
+            with TemporaryDirectory() as directory:
+                artifacts = write_validation_artifacts(report, directory)
+                self.assertTrue(all(check["evidence_ref"].startswith("evidence_")
+                                    for check in json.loads(
+                                        Path(artifacts["json"]).read_text(encoding="utf-8")).get("checks", [])))
+                with zipfile.ZipFile(artifacts["evidence_package"]) as package:
+                    members = set(package.namelist())
+                self.assertTrue(any(name.endswith("/central/project.json") for name in members))
+                self.assertTrue(any(name.endswith("/sentinel/plan.json") for name in members))
 
     def test_validation_forms_are_excluded_from_source_scope(self):
         client = FakeClient()
