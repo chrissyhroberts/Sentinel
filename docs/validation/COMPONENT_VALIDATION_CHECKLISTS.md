@@ -18,6 +18,18 @@ Central project and Sentinel configuration; it does not submit or edit data.
 It also writes a paired `validation_certificate.pdf` for human review. The
 JSON remains authoritative and the PDF links each row back to that report.
 
+For an active, synthetic Central/Sentinel test, run:
+
+```text
+python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --validate-active
+```
+
+This uses only `sentinel_validation_central`. It creates one test submission,
+performs one controlled edit, and verifies the retained versions, Central
+diff/reason evidence and before/after XML hashes. It is safe to repeat because
+each run uses a fresh validation run ID. It is not a substitute for the
+Collect, Enketo or MethodMesh checks below.
+
 Detailed checklists:
 
 - [ODK Central](ODK_CENTRAL_VALIDATION_CHECKLIST.md)

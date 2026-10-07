@@ -83,6 +83,24 @@ class CentralClient:
                 self.upload_attachment(form_id, instance, filename, data,
                                        content_type="application/octet-stream")
 
+    def create_validation_submission(self, form_id: str, xml: bytes, *, device_id: str) -> dict[str, Any]:
+        """Create a synthetic validation submission through Central's REST API."""
+        query = urllib.parse.urlencode({"deviceID": device_id})
+        return dict(self._request(
+            "POST", self._form_path(form_id) + f"/submissions?{query}",
+            accept="application/json", raw_body=xml, content_type="text/xml",
+            extra_headers={"X-Action-Notes": "Sentinel automated validation submission"},
+        ))
+
+    def update_validation_submission(self, form_id: str, instance_id: str, xml: bytes,
+                                     *, action_notes: str) -> dict[str, Any]:
+        """Create a new synthetic validation version using the Central REST API."""
+        return dict(self._request(
+            "PUT", self._submission_path(form_id, instance_id),
+            accept="application/json", raw_body=xml, content_type="text/xml",
+            extra_headers={"X-Action-Notes": action_notes},
+        ))
+
     def upload_attachment(self, form_id: str, instance_id: str, filename: str, data: bytes,
                           content_type: str | None = None) -> None:
         path = self._submission_path(form_id, instance_id) + f"/attachments/{_quote(filename)}"

@@ -148,3 +148,25 @@ what the configured Central account could observe or read; Sentinel checks
 state what Sentinel itself verified. The certificate does not silently claim
 validation of Collect, Enketo, MethodMesh or host infrastructure unless those
 tests are explicitly present and evidenced.
+
+### Active synthetic validation
+
+Once the project validation forms are published and listed in
+`validation_form_ids`, run the Central/Sentinel exercise with:
+
+```text
+python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --validate-active
+```
+
+This creates one synthetic record in `sentinel_validation_central`, updates it
+once, and checks that Central retained the versions, field-level diff and
+action reason. Sentinel also hashes the retrieved XML before and after the
+edit. The JSON report and PDF certificate are written to the same validation
+output directory as the read-only review.
+
+The active run uses synthetic validation data only. It does not open, edit or
+delete a source-study submission, and it does not claim to have tested
+Collect, Enketo or MethodMesh. Those components require their separate
+fixtures and, where necessary, a device or browser witness. The underlying
+calls use the [ODK Central submission API](https://docs.getodk.org/central-api-submission-management/)
+and its [OpenRosa endpoints](https://docs.getodk.org/central-api-openrosa-endpoints/).

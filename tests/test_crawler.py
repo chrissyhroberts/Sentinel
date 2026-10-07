@@ -2,7 +2,7 @@ import json
 import unittest
 
 from sentinel_archive.crawler import ProjectAuditor
-from sentinel_archive.validation import validate_plan
+from sentinel_archive.validation import run_active_validation, validate_plan
 
 
 class FakeConfig:
@@ -10,6 +10,7 @@ class FakeConfig:
     audit_form_id = "sentinel_project_audit"
     timestamp_policy = "disabled"
     timestamp_url = "https://tsa.example.invalid/tsa"
+    validation_form_ids = ("sentinel_validation_central",)
 
 
 class FakeClient:
@@ -67,7 +68,52 @@ class FakeSink:
         self.submissions.append((form_id, xml, attachments))
 
 
+class ActiveFakeClient:
+    class Config:
+        project_id = "16"
+        validation_form_ids = ("sentinel_validation_central",)
+
+    config = Config()
+
+    def __init__(self):
+        self.current = None
+        self.initial = None
+        self.updated = False
+
+    def create_validation_submission(self, form_id, xml, *, device_id):
+        self.initial = xml
+        self.current = xml
+        return {"instanceId": "uuid:active-fake"}
+
+    def update_validation_submission(self, form_id, instance_id, xml, *, action_notes):
+        self.current = xml
+        self.updated = True
+        return {"instanceId": "uuid:active-fake-edited"}
+
+    def submission_xml(self, form_id, instance_id):
+        return self.current
+
+    def versions(self, form_id, instance_id):
+        if not self.updated:
+            return [{"instanceId": "uuid:active-fake"}]
+        return [{"instanceId": "uuid:active-fake"}, {"instanceId": "uuid:active-fake-edited"}]
+
+    def diffs(self, form_id, instance_id):
+        return {"uuid:active-fake-edited": [{"path": ["test_value"], "old": "CENTRAL-A", "new": "CENTRAL-B"}]}
+
+    def audits(self, form_id, instance_id):
+        return [{"action": "submission.update", "details": {
+            "actionNotes": "Sentinel validation changed test_value from CENTRAL-A to CENTRAL-B"
+        }}]
+
+
 class CrawlerTests(unittest.TestCase):
+    def test_active_validation_exercises_synthetic_create_edit_and_evidence(self):
+        report = run_active_validation(ActiveFakeClient())
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["summary"], {"checks": 5, "passed": 5, "failed": 0})
+        self.assertEqual(report["mode"], "active_synthetic_validation")
+
     def test_read_only_validation_separates_central_and_sentinel_checks(self):
         client = FakeClient()
         plan = ProjectAuditor(client).plan()

@@ -14,6 +14,7 @@
 | SEN-10 | Audit-form edits are detectable through manifest/hash evidence | Automated | Tamper simulation | [ ] |
 | SEN-11 | No source data are edited, deleted or stored outside approved boundaries | Automated/Hybrid | API comparison and environment review | [ ] |
 | SEN-12 | `--validate` remains read-only and returns machine-readable evidence | Automated | CLI test output | [ ] |
+| SEN-13 | Active synthetic validation distinguishes pre-edit and post-edit XML hashes | Automated | `--validate-active` report | [ ] |
 
 These checks validate Sentinel's behavior and evidence production. They rely on
 ODK Central as the source system and do not replace the separate Central,

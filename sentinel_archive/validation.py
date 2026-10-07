@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import hashlib
+import uuid
+import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .crawler import AuditPlan
+from .central import CentralError
+from .crawler import AuditPlan, _sha
 from .project import audit_instance_id
+from xml.sax.saxutils import escape
 
 
 @dataclass(frozen=True)
@@ -120,6 +124,110 @@ def validation_error(project_id: str, error: Exception) -> dict[str, Any]:
             "detail": f"Discovery failed: {type(error).__name__}: {error}",
         }],
     }
+
+
+def run_active_validation(client: Any) -> dict[str, Any]:
+    """Create and edit one synthetic Central validation record, then verify it."""
+    form_id = next(
+        (value for value in getattr(client.config, "validation_form_ids", ())
+         if value == "sentinel_validation_central"),
+        "sentinel_validation_central",
+    )
+    run_id = "active-" + uuid.uuid4().hex[:16]
+    initial_id = "uuid:sentinel-validation-" + uuid.uuid4().hex
+    edited_id = "uuid:sentinel-validation-" + uuid.uuid4().hex
+    device_id = "sentinel-validation-harness"
+    initial_xml = _validation_xml(form_id, initial_id, run_id, "CENTRAL-A", "initial", "")
+    edited_xml = _validation_xml(
+        form_id, edited_id, run_id, "CENTRAL-B", "edited",
+        "Controlled Sentinel validation edit",
+        deprecated_id=initial_id,
+    )
+    checks: list[dict[str, str]] = []
+
+    def add(check_id: str, passed: bool, detail: str, evidence: str = "validation_report.json") -> None:
+        checks.append({
+            "check_id": check_id,
+            "component": "ODK Central" if check_id.startswith("central_") else "Sentinel",
+            "mode": "automated",
+            "status": "pass" if passed else "fail",
+            "detail": detail,
+            "evidence_ref": evidence,
+        })
+
+    try:
+        created = client.create_validation_submission(form_id, initial_xml, device_id=device_id)
+        logical_id = str(created.get("instanceId") or initial_id)
+        created_xml = client.submission_xml(form_id, logical_id)
+        created_root = ET.fromstring(created_xml)
+        created_value = _xml_field(created_root, "test_value")
+        add("central_active_create", created_value == "CENTRAL-A",
+            f"Created and retrieved synthetic submission {logical_id}")
+        initial_hash = _sha(created_xml)
+
+        client.update_validation_submission(
+            form_id, logical_id, edited_xml,
+            action_notes="Sentinel validation changed test_value from CENTRAL-A to CENTRAL-B",
+        )
+        versions = client.versions(form_id, logical_id)
+        current_xml = client.submission_xml(form_id, logical_id)
+        current_root = ET.fromstring(current_xml)
+        current_value = _xml_field(current_root, "test_value")
+        diffs = client.diffs(form_id, logical_id)
+        audits = client.audits(form_id, logical_id)
+        diff_text = json.dumps(diffs, sort_keys=True)
+        audit_text = json.dumps(audits, sort_keys=True)
+        add("central_active_edit", current_value == "CENTRAL-B" and len(versions) >= 2,
+            f"Retrieved edited value and {len(versions)} retained submission versions")
+        add("central_active_diff", "CENTRAL-A" in diff_text and "CENTRAL-B" in diff_text,
+            "Central diff evidence contains the expected old and new values")
+        add("central_active_reason", "Controlled Sentinel validation edit" in _xml_field(current_root, "change_reason")
+            or "Controlled Sentinel validation" in audit_text,
+            "The controlled edit reason is present in the submission or Central audit evidence")
+        add("sentinel_active_hash_change", initial_hash != _sha(current_xml),
+            "Sentinel can distinguish the original and edited XML byte hashes")
+    except (CentralError, ET.ParseError) as error:
+        add("central_active_create", False, f"Active validation failed: {type(error).__name__}: {error}")
+
+    failures = sum(check["status"] == "fail" for check in checks)
+    return {
+        "schema": "methodmesh.sentinel.validation_report.v1",
+        "project_id": str(client.config.project_id),
+        "components": ["ODK Central", "Sentinel"],
+        "mode": "active_synthetic_validation",
+        "validation_run_id": run_id,
+        "validation_form_id": form_id,
+        "status": "failed" if failures else "passed",
+        "summary": {"checks": len(checks), "passed": len(checks) - failures, "failed": failures},
+        "checks": checks,
+        "safety": "Synthetic validation data only; no participant or source-study form was modified.",
+    }
+
+
+def _validation_xml(form_id: str, instance_id: str, run_id: str, value: str,
+                    case: str, reason: str, *, deprecated_id: str = "") -> bytes:
+    deprecated = f"<deprecatedID>{escape(deprecated_id)}</deprecatedID>" if deprecated_id else ""
+    xml = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<data id="{escape(form_id)}" version="1" xmlns:orx="http://openrosa.org/xforms">'
+        f'<orx:meta><orx:instanceID>{escape(instance_id)}</orx:instanceID>'
+        f'<orx:instanceName>{escape(run_id)}_{escape(case)}</orx:instanceName>{deprecated}</orx:meta>'
+        f'<validation_run_id>{escape(run_id)}</validation_run_id>'
+        f'<test_case_id>central_active_{escape(case)}</test_case_id>'
+        f'<test_value>{escape(value)}</test_value>'
+        f'<expected_value>CENTRAL-B</expected_value>'
+        f'<change_reason>{escape(reason)}</change_reason>'
+        f'<operator_note>Sentinel active validation harness</operator_note>'
+        f'</data>'
+    )
+    return xml.encode("utf-8")
+
+
+def _xml_field(root: ET.Element, name: str) -> str:
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] == name:
+            return str(element.text or "")
+    return ""
 
 
 def write_validation_artifacts(report: dict[str, Any], output_dir: str | Path) -> dict[str, str]:

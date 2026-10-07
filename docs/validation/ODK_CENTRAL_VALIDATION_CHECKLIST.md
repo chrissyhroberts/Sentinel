@@ -11,6 +11,8 @@
 | CEN-07 | Change reasons/comments are available for the tested edit path | Hybrid | Central activity view and API evidence | [ ] |
 | CEN-08 | Source records remain unchanged by Sentinel | Automated | API comparison before/after | [ ] |
 | CEN-09 | Retention, backup and restore arrangements are approved | Witnessed | Infrastructure/quality evidence | [ ] |
+| CEN-10 | A synthetic submission can be created and edited through the configured account | Automated | `--validate-active` report | [ ] |
+| CEN-11 | Central retains the synthetic edit version, old/new diff and action reason | Automated | `--validate-active` report and Central activity view | [ ] |
 
 The automated Central checks validate the API surface available to the
 configured project account. They do not validate Central host infrastructure,
