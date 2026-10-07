@@ -5,16 +5,17 @@ same Sentinel code and the same audit form can be used on any Central install;
 only Central connection settings, the project allowlist, and the published
 audit-form identifier are configuration.
 
-The current universal form is [audit_001_v4.xlsx](../odk_forms/audit/audit_001_v4.xlsx).
+The current universal form is [audit_001_v5.xlsx](../odk_forms/audit/audit_001_v5.xlsx).
 Publish it once in each audited project. Sentinel needs read permission on the
 project's source forms and submit permission on this audit form. It never edits
 or deletes source submissions.
 
-When version 4 is published, set `audit_form_id` and `audit_form_version` in
-the local Sentinel configuration. Version 3 contains the ledger fields and
-batch timestamp fields, including the RFC3161 token upload, dedicated JSON/PDF
-fields for platform snapshots and validation certificates, and a generic ZIP
-evidence-package field. It does not contain a source-data bundle field.
+When version 5 is published, set `audit_form_id` and `audit_form_version` in
+the local Sentinel configuration. Version 5 contains the ledger and batch
+timestamp fields, dedicated JSON/PDF fields for project health, project users
+and roles, privileged admin snapshots and validation certificates, and a
+generic ZIP evidence-package field. It does not contain a source-data bundle
+field.
 
 The dedicated evidence attachment fields are:
 
@@ -23,8 +24,12 @@ The dedicated evidence attachment fields are:
 | `timestamp_manifest` | `timestamp_manifest.json` | Run manifest |
 | `timestamp_token` | `timestamp_token.tsr` | RFC3161 timestamp token |
 | `timestamp_certificate` | `timestamp_certificate.pem` | TSA certificate |
-| `platform_snapshot` | `platform_snapshot.json` | Machine-readable health snapshot |
-| `platform_snapshot_pdf` | `platform_snapshot.pdf` | Human-readable health snapshot |
+| `project_health_snapshot` | `project_health_snapshot.json` | Machine-readable project health snapshot |
+| `project_health_snapshot_pdf` | `project_health_snapshot.pdf` | Human-readable project health snapshot |
+| `project_user_roles_snapshot` | `project_user_roles_snapshot.json` | Machine-readable project users and roles snapshot |
+| `project_user_roles_snapshot_pdf` | `project_user_roles_snapshot.pdf` | Human-readable project users and roles snapshot |
+| `admin_platform_snapshot` | `admin_platform_snapshot.json` | Machine-readable privileged platform snapshot |
+| `admin_platform_snapshot_pdf` | `admin_platform_snapshot.pdf` | Human-readable privileged platform snapshot |
 | `validation_report` | `validation_report.json` | Machine-readable validation report |
 | `validation_certificate` | `validation_certificate.pdf` | Human-readable validation certificate |
 | `evidence_package` | `evidence_package.zip` | Complete JSON/PDF/raw-evidence bundle |

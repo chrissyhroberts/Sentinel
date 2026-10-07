@@ -290,17 +290,22 @@ class ProjectAuditor:
             "timestamp_token": "",
             "timestamp_token_sha256": "",
             "timestamp_certificate": "",
-            "platform_snapshot": "platform_snapshot.json",
-            "platform_snapshot_pdf": "platform_snapshot.pdf" if snapshot_pdf else "",
+            **snapshot_attachment_fields(
+                getattr(self.client.config, "audit_form_version", "1"),
+                "project_health_snapshot", "project_health_snapshot_pdf",
+                "project_health_snapshot.json", "project_health_snapshot.pdf" if snapshot_pdf else "",
+            ),
             "validation_report": "",
             "validation_certificate": "",
             "evidence_package": "",
             "sentinel_run_id": run_id,
             "checkpoint_cursor": str(len(plan.tasks)),
         }
-        snapshot_attachments = {"platform_snapshot.json": snapshot_bytes}
+        json_attachment, pdf_attachment = snapshot_attachment_names(
+            fields, "project_health_snapshot", "project_health_snapshot_pdf")
+        snapshot_attachments = {json_attachment: snapshot_bytes}
         if snapshot_pdf:
-            snapshot_attachments["platform_snapshot.pdf"] = snapshot_pdf
+            snapshot_attachments[pdf_attachment] = snapshot_pdf
         self.sink.submit(
             self.client.config.audit_form_id,
             _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
@@ -343,17 +348,22 @@ class ProjectAuditor:
             "timestamp_token": "",
             "timestamp_token_sha256": "",
             "timestamp_certificate": "",
-            "platform_snapshot": "platform_snapshot.json",
-            "platform_snapshot_pdf": "platform_snapshot.pdf" if snapshot_pdf else "",
+            **snapshot_attachment_fields(
+                getattr(self.client.config, "audit_form_version", "1"),
+                "project_user_roles_snapshot", "project_user_roles_snapshot_pdf",
+                "project_user_roles_snapshot.json", "project_user_roles_snapshot.pdf" if snapshot_pdf else "",
+            ),
             "validation_report": "",
             "validation_certificate": "",
             "evidence_package": "",
             "sentinel_run_id": run_id,
             "checkpoint_cursor": "",
         }
-        attachments = {"platform_snapshot.json": snapshot_bytes}
+        json_attachment, pdf_attachment = snapshot_attachment_names(
+            fields, "project_user_roles_snapshot", "project_user_roles_snapshot_pdf")
+        attachments = {json_attachment: snapshot_bytes}
         if snapshot_pdf:
-            attachments["platform_snapshot.pdf"] = snapshot_pdf
+            attachments[pdf_attachment] = snapshot_pdf
         self.sink.submit(
             self.client.config.audit_form_id,
             _audit_xml(audit_id, fields, getattr(self.client.config, "audit_form_version", "1"),
@@ -841,6 +851,29 @@ def _audit_xml(instance_id: str, fields: dict[str, str], form_version: str,
     return (f'<?xml version="1.0" encoding="UTF-8"?><data id="{escape(form_id)}" version="{escape(form_version)}" '
             'xmlns:orx="http://openrosa.org/xforms">'
             f"{values}<orx:meta><orx:instanceID>{escape(_xml_safe(instance_id))}</orx:instanceID></orx:meta></data>").encode()
+
+
+def snapshot_attachment_fields(form_version: str, json_field: str, pdf_field: str,
+                                json_filename: str, pdf_filename: str) -> dict[str, str]:
+    """Use dedicated evidence fields in audit form v5+, retaining v4 fallback."""
+    try:
+        dedicated = int(str(form_version).lstrip("vV")) >= 5
+    except ValueError:
+        dedicated = False
+    fields = {"platform_snapshot": "", "platform_snapshot_pdf": ""}
+    if dedicated:
+        fields[json_field] = json_filename
+        fields[pdf_field] = pdf_filename
+    else:
+        fields["platform_snapshot"] = "platform_snapshot.json"
+        fields["platform_snapshot_pdf"] = "platform_snapshot.pdf" if pdf_filename else ""
+    return fields
+
+
+def snapshot_attachment_names(fields: dict[str, str], json_field: str, pdf_field: str) -> tuple[str, str]:
+    """Return the attachment filenames named by a v4-compatible field map."""
+    return (fields.get(json_field) or fields["platform_snapshot"],
+            fields.get(pdf_field) or fields["platform_snapshot_pdf"])
 
 
 def _xml_safe(value: Any) -> str:

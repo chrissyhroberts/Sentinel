@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from .central import CentralError
-from .crawler import _audit_xml, _json_document_pdf, _sha
+from .crawler import (_audit_xml, _json_document_pdf, _sha, snapshot_attachment_fields,
+                      snapshot_attachment_names)
 from .project import audit_instance_id
 
 
@@ -282,17 +283,22 @@ def _submit_admin_snapshot(client: Any, snapshot: dict[str, Any], artifacts: dic
         "timestamp_status": "not_requested",
         "timestamp_batch_id": run_id,
         "timestamp_batch_sha256": hashlib.sha256(snapshot_bytes).hexdigest(),
-        "platform_snapshot": "platform_snapshot.json",
-        "platform_snapshot_pdf": "platform_snapshot.pdf",
+        **snapshot_attachment_fields(
+            getattr(client.config, "audit_form_version", "1"),
+            "admin_platform_snapshot", "admin_platform_snapshot_pdf",
+            "admin_platform_snapshot.json", "admin_platform_snapshot.pdf",
+        ),
         "validation_report": "",
         "validation_certificate": "",
         "evidence_package": "evidence_package.zip",
         "sentinel_run_id": run_id,
         "checkpoint_cursor": str(snapshot["summary"]["checks"]),
     }
+    json_attachment, pdf_attachment = snapshot_attachment_names(
+        fields, "admin_platform_snapshot", "admin_platform_snapshot_pdf")
     attachments = {
-        "platform_snapshot.json": snapshot_bytes,
-        "platform_snapshot.pdf": Path(artifacts["pdf"]).read_bytes(),
+        json_attachment: snapshot_bytes,
+        pdf_attachment: Path(artifacts["pdf"]).read_bytes(),
         "evidence_package.zip": Path(artifacts["evidence_package"]).read_bytes(),
     }
     client.submit(client.config.audit_form_id,

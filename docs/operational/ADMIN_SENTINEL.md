@@ -53,9 +53,10 @@ include project-user logins and user, assignment, form and project lifecycle
 events exposed by Central. Available Central system observations and an
 optional host snapshot are included too.
 
-The audit-form record type is `admin_platform_snapshot`. Its attachments use
-the existing universal fields `platform_snapshot`, `platform_snapshot_pdf` and
-`evidence_package`.
+The audit-form record type is `admin_platform_snapshot`. Version 5 of the
+universal audit form gives it dedicated `admin_platform_snapshot` and
+`admin_platform_snapshot_pdf` fields, plus the shared `evidence_package` ZIP
+field.
 
 ## Host metrics and API limits
 

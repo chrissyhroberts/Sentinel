@@ -38,7 +38,7 @@ Operational procedures are in [docs/operational](docs/operational/). The
 risk-based validation checklist and workflow are in
 [docs/validation](docs/validation/).
 
-The current test form is `audit_001`, version 4. The form ID and version are
+The current test form is `audit_001`, version 5. The form ID and version are
 configuration values, so the same code can be used with a universal audit form
 on another Central installation.
 

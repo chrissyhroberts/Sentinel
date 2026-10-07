@@ -10,7 +10,7 @@ from sentinel_archive.admin import run_admin_validation
 class AdminConfig:
     project_id = "239"
     audit_form_id = "audit_001"
-    audit_form_version = "4"
+    audit_form_version = "5"
     admin_project_ids = ("239",)
     admin_audit_start = "2026-10-01T00:00:00Z"
     admin_audit_end = "2026-10-07T00:00:00Z"
@@ -75,7 +75,7 @@ class AdminValidationTests(unittest.TestCase):
             self.assertEqual(form_id, "audit_001")
             self.assertIn(b"<record_type>admin_platform_snapshot</record_type>", xml)
             self.assertEqual(set(attachments), {
-                "platform_snapshot.json", "platform_snapshot.pdf", "evidence_package.zip",
+                "admin_platform_snapshot.json", "admin_platform_snapshot.pdf", "evidence_package.zip",
             })
             written = json.loads(Path(result["artifacts"]["json"]).read_text(encoding="utf-8"))
             self.assertEqual(written["summary"]["warnings"], 1)
