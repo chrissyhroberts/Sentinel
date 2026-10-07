@@ -220,7 +220,7 @@ class CrawlerTests(unittest.TestCase):
         self.assertIn(b"<record_type>submission_edit</record_type>", submission[1])
         self.assertIn(b"<central_actor_id>user@example.org</central_actor_id>", submission[1])
         self.assertIn(b"Changed: /answer: old -&gt; new | Reason: corrected source value", submission[1])
-        manifest = [item for item in sink.submissions if b"<record_type>run_timestamp_manifest</record_type>" in item[1]][0]
+        manifest = [item for item in sink.submissions if b"<record_type>sentinel_run_qa_snapshot</record_type>" in item[1]][0]
         self.assertEqual(set(manifest[2]), {
             "timestamp_manifest.json", "project_health_snapshot.json",
             "project_user_roles_snapshot.json", "validation_report.json",

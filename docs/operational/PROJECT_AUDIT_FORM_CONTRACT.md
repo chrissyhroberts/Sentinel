@@ -58,13 +58,13 @@ submission UUID; Sentinel does not copy it into the audit form.
 | `submission_edit` | A later retained Central edit of that submission |
 | `central_*` | Optional project-filtered Central server-audit event; disabled by default |
 | `project_checkpoint` | The crawl checkpoint for the configured project |
-| `run_timestamp_manifest` | The manifest covering one Sentinel run |
+| `sentinel_run_qa_snapshot` | Consolidated QA, timestamp and evidence snapshot for one Sentinel run |
 | `validation_certificate` | Automated validation and reconciliation results for one Sentinel run |
 | `project_health_snapshot` | Non-participant project/API inventory observed during one Sentinel run |
 | `project_user_roles_snapshot` | Project-visible Web User and role-assignment inventory observed during one Sentinel run |
 | `admin_platform_snapshot` | Privileged, time-scoped Central administration and platform snapshot |
 
-Each run also creates a `run_timestamp_manifest` record. Its
+Each run also creates a `sentinel_run_qa_snapshot` record. Its
 `timestamp_batch_sha256` is the SHA-256 of the attached `timestamp_manifest.json`,
 and `timestamp_batch_id` links the audit record to the manifest and to the
 `sentinel_run_id` values on records processed in that run. Sentinel sends only
@@ -79,7 +79,7 @@ intermediate manifest. It is deliberately not a `previous_attestation_hash`
 chain on every source record.
 
 Every run carries the validation report and human-readable certificate on the
-same `run_timestamp_manifest` record. The report includes deterministic-ID
+same `sentinel_run_qa_snapshot` record. The report includes deterministic-ID
 uniqueness, planned-versus-processed reconciliation, manifest-chain status and
 timestamp status.
 

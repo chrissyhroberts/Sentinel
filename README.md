@@ -107,7 +107,7 @@ Completed records are not rewritten. A subsequent run skips an existing
 deterministic record and only submits new source versions or new enabled audit
 events.
 
-Each run submits one consolidated `run_timestamp_manifest` record carrying the
+Each run submits one consolidated `sentinel_run_qa_snapshot` record carrying the
 timestamp manifest, project health snapshot, project user/role snapshot,
 validation report/certificate and any evidence package through their dedicated
 attachment fields. This keeps the audit table at one run line while preserving

@@ -638,7 +638,7 @@ class ProjectAuditor:
                 element.tag.rsplit("}", 1)[-1]: str(element.text or "")
                 for element in root
             }
-            if values.get("record_type") != "run_timestamp_manifest":
+            if values.get("record_type") not in {"run_timestamp_manifest", "sentinel_run_qa_snapshot"}:
                 continue
             manifest_hash = values.get("timestamp_batch_sha256", "")
             if not manifest_hash:
@@ -679,7 +679,7 @@ class ProjectAuditor:
     def _submit_run_manifest(self, run_id: str, records: list[dict[str, Any]],
                              previous: dict[str, str], *, submit: bool = True):
         manifest = {
-            "schema": "methodmesh.sentinel.run_timestamp_manifest.v1",
+            "schema": "methodmesh.sentinel.sentinel_run_qa_snapshot.v1",
             "project_id": self.project_id,
             "run_id": run_id,
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -689,7 +689,7 @@ class ProjectAuditor:
                 "original_submission": "The original Central submission version",
                 "submission_edit": "A later Central-retained edit of a submission",
                 "project_checkpoint": "The project crawl checkpoint",
-                "run_timestamp_manifest": "The manifest for this Sentinel run",
+                "sentinel_run_qa_snapshot": "The consolidated QA/evidence snapshot for this Sentinel run",
                 "validation_certificate": "Automated checks for this Sentinel run",
                 "project_health_snapshot": "Project-level Central API health and inventory observation",
                 "project_user_roles_snapshot": "Project-visible Web User and role-assignment observation",
@@ -701,7 +701,7 @@ class ProjectAuditor:
         evidence = self._timestamp_manifest(manifest_bytes)
         audit_id = run_manifest_instance_id(self.project_id, run_id)
         fields = {
-            "record_type": "run_timestamp_manifest",
+            "record_type": "sentinel_run_qa_snapshot",
             "project_id": self.project_id,
             "source_form_id": "",
             "source_instance_id": "",
@@ -787,7 +787,7 @@ class ProjectAuditor:
         certificate_pdf = _json_document_pdf(certificate, "Sentinel validation certificate")
         audit_id = run_manifest_instance_id(self.project_id, run_id)
         fields = {
-            "record_type": "run_timestamp_manifest",
+            "record_type": "sentinel_run_qa_snapshot",
             "project_id": self.project_id,
             "source_form_id": "",
             "source_instance_id": "",
