@@ -78,6 +78,13 @@ report includes deterministic-ID uniqueness, planned-versus-processed
 reconciliation, manifest-chain status and timestamp status. The certificate
 has its own hash and timestamp evidence.
 
+The active validation certificate contains twenty automated checks. Its PDF
+`evidence_ref` values point to concrete raw files inside
+`evidence_package.zip`, rather than merely pointing to the summary JSON. The
+package includes the form definition, original and edited XML, retained
+version metadata, diffs, Central audit events, comments, attachment inventory,
+submission metadata, Sentinel scope/plan evidence and the hash manifest.
+
 The same form also stores one deterministic project checkpoint record. A new
 run reads that checkpoint and the existing audit-form submissions before
 fetching work, so completed versions are not repeated.

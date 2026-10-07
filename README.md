@@ -166,17 +166,28 @@ python3 -m sentinel_archive.cli .sentinel-local/sentinel.config --validate-activ
 ```
 
 This creates one synthetic record in `sentinel_validation_central`, updates it
-once, and checks that Central retained structured versions, the field-level
-diff, the action reason, an audit-trail event and the validation-run identity.
-Sentinel also hashes the retrieved XML before and after the edit, confirms the
-raw evidence was captured, and confirms the exercise stayed inside the
-configured synthetic validation form. The JSON report and PDF certificate are
-written to the same validation output directory as the read-only review.
+once, and runs a 20-check Central/Sentinel exercise covering form-definition
+readability, creation, retained structured versions, distinct version
+identities, independent original-version readback, attachment inventory,
+field-level diff, linked reason, audit-trail and actor evidence, metadata and
+comments access, XML well-formedness, validation-run identity, before/after
+hashes, deterministic identity, evidence capture and synthetic-form scope.
+The JSON report and PDF certificate are written to the same validation output
+directory as the read-only review.
 
 The active report is also submitted to the configured audit form as a
 `validation_certificate` record, with `validation_report.json`, the PDF when
 available, and `evidence_package.zip` attached. The command prints the
 resulting audit record ID.
+
+Each certificate row's `evidence_ref` points to a concrete member of the ZIP,
+not to the summary JSON. The package includes the original and edited XML,
+retained-version metadata, Central diffs, audit events, actor metadata,
+comments, attachment inventory, form definition and Sentinel scope/plan
+evidence. `evidence_manifest.json` records the SHA-256 and size of every
+packaged file. When selecting the original Central version, Sentinel uses the
+retained version whose `instanceId` matches the original logical submission;
+it does not assume Central returns versions in chronological order.
 
 The active run uses synthetic validation data only. It does not open, edit or
 delete a source-study submission, and it does not claim to have tested
