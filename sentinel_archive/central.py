@@ -61,30 +61,24 @@ class CentralClient:
         return result
 
     def submit(self, form_id: str, xml: bytes, attachments: dict[str, bytes]) -> None:
-        path = f"/v1/projects/{_quote(self.config.project_id)}/submission"
-
-        def post_submission(filename: str | None = None, data: bytes | None = None) -> None:
-            fields = {"xml_submission_file": ("submission.xml", xml, "text/xml")}
-            if filename is not None and data is not None:
-                fields[filename] = (
-                    filename,
-                    data,
-                    mimetypes.guess_type(filename)[0] or "application/octet-stream",
-                )
-            self._request(
-                "POST", path, accept="text/xml", raw=True, multipart=fields,
-                extra_headers={"X-OpenRosa-Version": "1.0"},
+        fields = {"xml_submission_file": ("submission.xml", xml, "text/xml")}
+        fields.update({
+            filename: (
+                filename,
+                data,
+                mimetypes.guess_type(filename)[0] or "application/octet-stream",
             )
-
-        if not attachments:
-            post_submission()
-            return
-        # Central supports adding attachments through repeated OpenRosa POSTs,
-        # provided the XML is byte-for-byte identical on every request. This is
-        # the supported path for expected file slots and avoids relying on a
-        # separate REST attachment route for newly created submissions.
-        for filename, data in attachments.items():
-            post_submission(filename, data)
+            for filename, data in attachments.items()
+        })
+        # This form-specific REST endpoint is the path used by the original
+        # working Sentinel archive implementation. It accepts the XML and its
+        # expected file slots in one multipart request.
+        self._request(
+            "POST",
+            self._form_path(form_id) + "/submissions",
+            accept="application/json",
+            multipart=fields,
+        )
 
     def create_validation_submission(self, form_id: str, xml: bytes, *, device_id: str) -> dict[str, Any]:
         """Create a synthetic validation submission through Central's REST API."""
