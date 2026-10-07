@@ -1,6 +1,6 @@
 # Test-project run
 
-Publish `docs/project_audit_sentinel_v1.xlsx` in the selected Central project,
+Publish `docs/odk_forms/audit/project_audit_sentinel_v1.xlsx` in the selected Central project,
 give the Sentinel account read access to source forms and submit access to the
 audit form, then create a local configuration file outside the repository:
 

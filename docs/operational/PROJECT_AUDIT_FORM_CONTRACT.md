@@ -5,7 +5,7 @@ same Sentinel code and the same audit form can be used on any Central install;
 only Central connection settings, the project allowlist, and the published
 audit-form identifier are configuration.
 
-The current universal form is [audit_001_v2.xlsx](audit_001_v2.xlsx).
+The current universal form is [audit_001_v2.xlsx](../odk_forms/audit/audit_001_v2.xlsx).
 Publish it once in each audited project. Sentinel needs read permission on the
 project's source forms and submit permission on this audit form. It never edits
 or deletes source submissions.
