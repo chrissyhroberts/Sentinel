@@ -248,7 +248,12 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         audit_text = json.dumps(audits, sort_keys=True)
         version_ids = [str(item.get("instanceId") or item.get("versionId") or item.get("id") or "")
                        for item in versions]
-        original_version_xml = client.version_xml(form_id, logical_id, version_ids[0]) if version_ids else b""
+        original_version_id = logical_id if logical_id in version_ids else next(
+            (str(item.get("instanceId") or item.get("versionId") or item.get("id") or "")
+             for item in versions if not item.get("current")),
+            "",
+        )
+        original_version_xml = client.version_xml(form_id, logical_id, original_version_id) if original_version_id else b""
         attachment_inventory = client.version_attachments(form_id, logical_id, version_ids[-1]) if version_ids else []
         add("central_active_edit", current_value == "CENTRAL-B" and len(versions) >= 2,
             f"Retrieved edited value and {len(versions)} retained submission versions")
