@@ -37,7 +37,7 @@ Operational procedures are in [docs/operational](docs/operational/). The
 risk-based validation checklist and workflow are in
 [docs/validation](docs/validation/).
 
-The current test form is `audit_001`, version 3. The form ID and version are
+The current test form is `audit_001`, version 4. The form ID and version are
 configuration values, so the same code can be used with a universal audit form
 on another Central installation.
 
@@ -89,8 +89,10 @@ events.
 
 Each run also submits a `validation_certificate` record. Its
 `validation_report.json` attachment contains the automated check results and
-its `validation_certificate.pdf` attachment is the human-readable copy. The
-JSON is independently timestamped using the same preferred/required policy. A
+its `validation_certificate.pdf` attachment is the human-readable copy. An
+active validation run also attaches `evidence_package.zip`, containing the
+JSON, PDF, raw API evidence and a hashed `evidence_manifest.json`. The JSON is
+independently timestamped using the same preferred/required policy. A
 certificate with warnings is still preserved for review; a required timestamp
 failure stops the run.
 
@@ -138,13 +140,15 @@ run Sentinel so the PDF certificate can be generated:
 python3 -m pip install -e .
 ```
 
-By default this writes two paired artifacts under
+By default this writes paired artifacts under
 `.sentinel-local/validation/`:
 
 - `validation_report.json` - the machine-readable authoritative report;
 - `validation_certificate.pdf` - the human-readable certificate, with one row
   per test, component ownership, mode, pass/fail result and a link to the JSON
   evidence bundle.
+- `evidence_package.zip` - the active-validation bundle containing raw API
+  evidence and an SHA-256 manifest.
 
 The PDF is a review view, not a replacement for the JSON. Central checks state
 what the configured Central account could observe or read; Sentinel checks
@@ -168,9 +172,9 @@ edit. The JSON report and PDF certificate are written to the same validation
 output directory as the read-only review.
 
 The active report is also submitted to the configured audit form as a
-`validation_certificate` record, with `validation_report.json` and, when PDF
-generation is available, `validation_certificate.pdf` attached. The command
-prints the resulting audit record ID.
+`validation_certificate` record, with `validation_report.json`, the PDF when
+available, and `evidence_package.zip` attached. The command prints the
+resulting audit record ID.
 
 The active run uses synthetic validation data only. It does not open, edit or
 delete a source-study submission, and it does not claim to have tested

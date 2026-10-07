@@ -284,6 +284,7 @@ class ProjectAuditor:
             "platform_snapshot_pdf": "platform_snapshot.pdf" if snapshot_pdf else "",
             "validation_report": "",
             "validation_certificate": "",
+            "evidence_package": "",
             "sentinel_run_id": run_id,
             "checkpoint_cursor": str(len(plan.tasks)),
         }
@@ -692,6 +693,7 @@ class ProjectAuditor:
             "platform_snapshot_pdf": "",
             "validation_report": "validation_report.json",
             "validation_certificate": "validation_certificate.pdf" if certificate_pdf else "",
+            "evidence_package": "",
             "sentinel_run_id": run_id,
             "checkpoint_cursor": str(len(records)),
         }

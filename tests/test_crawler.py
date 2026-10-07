@@ -1,5 +1,6 @@
 import json
 import unittest
+import zipfile
 
 from sentinel_archive.crawler import ProjectAuditor
 from sentinel_archive.validation import (run_active_validation,
@@ -129,11 +130,16 @@ class CrawlerTests(unittest.TestCase):
                 audit_id = submit_active_validation_evidence(client, report, artifacts)
                 self.assertTrue(audit_id.startswith("uuid:sentinel-"))
                 self.assertEqual(len(client.submitted), 1)
-                expected_attachments = {"validation_report.json"}
+                expected_attachments = {"validation_report.json", "evidence_package.zip"}
                 if artifacts.get("pdf"):
                     expected_attachments.add("validation_certificate.pdf")
                 self.assertEqual(set(client.submitted[0][2]), expected_attachments)
                 self.assertIn(b"<record_type>validation_certificate</record_type>", client.submitted[0][1])
+                with zipfile.ZipFile(artifacts["evidence_package"]) as package:
+                    members = set(package.namelist())
+                self.assertTrue(any(name.endswith("/evidence_manifest.json") for name in members))
+                self.assertTrue(any(name.endswith("/central/created_submission.xml") for name in members))
+                self.assertTrue(any(name.endswith("/central/diffs.json") for name in members))
 
     def test_read_only_validation_separates_central_and_sentinel_checks(self):
         client = FakeClient()

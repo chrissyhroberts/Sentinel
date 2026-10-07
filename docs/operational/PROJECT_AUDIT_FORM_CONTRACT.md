@@ -5,16 +5,16 @@ same Sentinel code and the same audit form can be used on any Central install;
 only Central connection settings, the project allowlist, and the published
 audit-form identifier are configuration.
 
-The current universal form is [audit_001_v3.xlsx](../odk_forms/audit/audit_001_v3.xlsx).
+The current universal form is [audit_001_v4.xlsx](../odk_forms/audit/audit_001_v4.xlsx).
 Publish it once in each audited project. Sentinel needs read permission on the
 project's source forms and submit permission on this audit form. It never edits
 or deletes source submissions.
 
-When version 3 is published, set `audit_form_id` and `audit_form_version` in
+When version 4 is published, set `audit_form_id` and `audit_form_version` in
 the local Sentinel configuration. Version 3 contains the ledger fields and
-batch timestamp fields, including the RFC3161 token upload, plus dedicated
-JSON/PDF fields for platform snapshots and validation certificates. It does
-not contain a source-data bundle field.
+batch timestamp fields, including the RFC3161 token upload, dedicated JSON/PDF
+fields for platform snapshots and validation certificates, and a generic ZIP
+evidence-package field. It does not contain a source-data bundle field.
 
 The dedicated evidence attachment fields are:
 
@@ -27,6 +27,7 @@ The dedicated evidence attachment fields are:
 | `platform_snapshot_pdf` | `platform_snapshot.pdf` | Human-readable health snapshot |
 | `validation_report` | `validation_report.json` | Machine-readable validation report |
 | `validation_certificate` | `validation_certificate.pdf` | Human-readable validation certificate |
+| `evidence_package` | `evidence_package.zip` | Complete JSON/PDF/raw-evidence bundle |
 
 ## One project-level ledger
 

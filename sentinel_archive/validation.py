@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import uuid
+import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -190,6 +192,17 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         add("central_active_create", False, f"Active validation failed: {type(error).__name__}: {error}")
 
     failures = sum(check["status"] == "fail" for check in checks)
+    evidence = {
+        "central/created_submission.xml": created_xml if "created_xml" in locals() else "",
+        "central/edited_submission.xml": current_xml if "current_xml" in locals() else "",
+        "central/versions.json": versions if "versions" in locals() else [],
+        "central/diffs.json": diffs if "diffs" in locals() else {},
+        "central/audits.json": audits if "audits" in locals() else [],
+        "central/hashes.json": {
+            "original_sha256": initial_hash if "initial_hash" in locals() else "",
+            "edited_sha256": _sha(current_xml) if "current_xml" in locals() else "",
+        },
+    }
     return {
         "schema": "methodmesh.sentinel.validation_report.v1",
         "project_id": str(client.config.project_id),
@@ -201,6 +214,7 @@ def run_active_validation(client: Any) -> dict[str, Any]:
         "summary": {"checks": len(checks), "passed": len(checks) - failures, "failed": failures},
         "checks": checks,
         "safety": "Synthetic validation data only; no participant or source-study form was modified.",
+        "_evidence": evidence,
     }
 
 
@@ -216,6 +230,11 @@ def submit_active_validation_evidence(client: Any, report: dict[str, Any],
         candidate = Path(pdf_path)
         if candidate.exists():
             attachments["validation_certificate.pdf"] = candidate.read_bytes()
+    package_path = artifacts.get("evidence_package", "")
+    if package_path:
+        candidate = Path(package_path)
+        if candidate.exists():
+            attachments["evidence_package.zip"] = candidate.read_bytes()
     audit_id = audit_instance_id(str(client.config.project_id), "active-validation", run_id, run_id)
     created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     status = str(report.get("status", "failed"))
@@ -243,6 +262,7 @@ def submit_active_validation_evidence(client: Any, report: dict[str, Any],
         "platform_snapshot_pdf": "",
         "validation_report": "validation_report.json",
         "validation_certificate": "validation_certificate.pdf" if "validation_certificate.pdf" in attachments else "",
+        "evidence_package": "evidence_package.zip" if "evidence_package.zip" in attachments else "",
         "sentinel_run_id": run_id,
         "checkpoint_cursor": str(report.get("summary", {}).get("checks", 0)),
     }
@@ -282,28 +302,67 @@ def _xml_field(root: ET.Element, name: str) -> str:
 
 
 def write_validation_artifacts(report: dict[str, Any], output_dir: str | Path) -> dict[str, str]:
-    """Write the JSON report and a reviewable PDF certificate."""
+    """Write JSON, PDF and a hashed ZIP evidence package."""
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
+    evidence = report.pop("_evidence", {})
     report = dict(report)
+    run_id = re.sub(r"[^A-Za-z0-9_.-]", "_", str(report.get("validation_run_id", "validation")))
     report["artifacts"] = {
         "json": "validation_report.json",
         "pdf": "validation_certificate.pdf",
+        "evidence_package": "evidence_package.zip",
     }
     report_path = destination / "validation_report.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     pdf_path = destination / "validation_certificate.pdf"
+    pdf_created = False
     try:
         _write_validation_pdf(report, pdf_path)
+        pdf_created = True
     except ModuleNotFoundError as error:
         if error.name != "reportlab":
             raise
-        return {
-            "json": str(report_path),
-            "pdf": "",
-            "pdf_error": "PDF certificate not generated: install the project dependencies with `python3 -m pip install -e .`",
-        }
-    return {"json": str(report_path), "pdf": str(pdf_path)}
+        report["artifacts"]["pdf"] = ""
+        report["pdf_error"] = "PDF certificate not generated: install the project dependencies with `python3 -m pip install -e .`"
+        report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    evidence_dir = destination / f"evidence_{run_id}"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    package_files: list[Path] = [report_path]
+    if pdf_created:
+        package_files.append(pdf_path)
+    for relative, value in evidence.items():
+        target = evidence_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(value, (dict, list)):
+            target.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        else:
+            target.write_text(str(value), encoding="utf-8")
+        package_files.append(target)
+    manifest = {
+        "schema": "methodmesh.sentinel.evidence_manifest.v1",
+        "validation_run_id": report.get("validation_run_id", ""),
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "files": [],
+    }
+    for path in package_files:
+        manifest["files"].append({
+            "path": str(path.relative_to(destination)),
+            "sha256": _sha(path.read_bytes()),
+            "size": path.stat().st_size,
+        })
+    manifest_path = evidence_dir / "evidence_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    package_files.append(manifest_path)
+    package_path = destination / "evidence_package.zip"
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in package_files:
+            archive.write(path, path.relative_to(destination))
+    result = {"json": str(report_path), "pdf": str(pdf_path) if pdf_created else "",
+              "evidence_package": str(package_path), "evidence_directory": str(evidence_dir)}
+    if not pdf_created:
+        result["pdf_error"] = report["pdf_error"]
+    return result
 
 
 def _write_validation_pdf(report: dict[str, Any], path: Path) -> None:
