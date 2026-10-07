@@ -27,6 +27,19 @@ class FakeClient:
     def project(self):
         return {"id": 16, "name": "Test project", "archived": False}
 
+    def users(self):
+        return [{"id": 15, "displayName": "Test User", "email": "user@example.org", "type": "user",
+                 "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z"}]
+
+    def roles(self):
+        return [{"id": 5, "system": "manager", "name": "Project Manager", "verbs": ["project.read"]}]
+
+    def project_assignments(self, project_id, role_id):
+        return [{"actorId": 15}]
+
+    def app_users(self, project_id):
+        return []
+
     def submissions(self, form_id):
         if form_id == "sentinel_project_audit":
             return []
@@ -237,6 +250,8 @@ class CrawlerTests(unittest.TestCase):
         self.assertIn(b"<validation_report>validation_report.json</validation_report>", manifest[1])
         self.assertIn(b'"retained_versions": 1', manifest[2]["project_health_snapshot.json"])
         self.assertIn(b'project_user_roles_snapshot.v1', manifest[2]["project_user_roles_snapshot.json"])
+        self.assertIn(b'"display_name": "Test User"', manifest[2]["project_user_roles_snapshot.json"])
+        self.assertIn(b'"roles": [\n          "manager"', manifest[2]["project_user_roles_snapshot.json"])
         self.assertIn(b'"status": "passed_with_warnings"', manifest[2]["validation_report.json"])
 
 

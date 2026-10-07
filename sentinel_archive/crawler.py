@@ -384,8 +384,14 @@ class ProjectAuditor:
             "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "project_id": self.project_id,
             "web_users": {"status": "unavailable", "items": []},
+            "app_users": {"status": "unavailable", "items": []},
             "roles": {"status": "unavailable", "items": []},
             "project_assignments": {},
+            "current_project_users": [],
+            "login_observation": {
+                "status": "unavailable_without_server_audit_access",
+                "note": "Web User last-login dates require the privileged Central audit feed.",
+            },
         }
         try:
             inventory["web_users"] = {"status": "available", "items": self.client.users()}
@@ -412,6 +418,77 @@ class ProjectAuditor:
                 inventory["project_assignments"][role_key] = {
                     "status": "unavailable", "error": type(error).__name__, "items": [],
                 }
+        try:
+            inventory["app_users"] = {"status": "available", "items": self.client.app_users(self.project_id)}
+        except (AttributeError, CentralError) as error:
+            inventory["app_users"] = {"status": "unavailable", "error": type(error).__name__, "items": []}
+
+        web_users = inventory["web_users"].get("items", [])
+        web_by_id = {str(item.get("id")): item for item in web_users if item.get("id") is not None}
+        members: dict[str, dict[str, Any]] = {}
+        for role_key, assignment in inventory["project_assignments"].items():
+            if not isinstance(assignment, dict):
+                continue
+            for value in assignment.get("items", []):
+                if not isinstance(value, dict):
+                    continue
+                actor = value.get("actor") if isinstance(value.get("actor"), dict) else value
+                actor_id = actor.get("id") or value.get("actorId") or value.get("actor_id")
+                if actor_id is None:
+                    continue
+                actor_id = str(actor_id)
+                source = dict(web_by_id.get(actor_id, {}))
+                source.update(actor)
+                member = members.setdefault(actor_id, {
+                    "actor_id": actor_id,
+                    "display_name": "",
+                    "email": "",
+                    "actor_type": "",
+                    "created_at": "",
+                    "updated_at": "",
+                    "deleted_at": "",
+                    "roles": [],
+                    "last_used": "",
+                    "last_login": None,
+                })
+                member.update({
+                    "display_name": source.get("displayName") or source.get("display_name") or member["display_name"],
+                    "email": source.get("email") or member["email"],
+                    "actor_type": source.get("type") or member["actor_type"],
+                    "created_at": source.get("createdAt") or member["created_at"],
+                    "updated_at": source.get("updatedAt") or member["updated_at"],
+                    "deleted_at": source.get("deletedAt") or member["deleted_at"],
+                })
+                if role_key not in member["roles"]:
+                    member["roles"].append(role_key)
+        for app_user in inventory["app_users"].get("items", []):
+            if not isinstance(app_user, dict):
+                continue
+            actor = app_user.get("actor") if isinstance(app_user.get("actor"), dict) else app_user
+            actor_id = actor.get("id") or app_user.get("id")
+            if actor_id is None:
+                continue
+            actor_id = str(actor_id)
+            member = members.setdefault(actor_id, {
+                "actor_id": actor_id, "display_name": "", "email": "", "actor_type": "",
+                "created_at": "", "updated_at": "", "deleted_at": "", "roles": [],
+                "last_used": "", "last_login": None,
+            })
+            member.update({
+                "display_name": actor.get("displayName") or actor.get("display_name") or member["display_name"],
+                "actor_type": actor.get("type") or "field_key",
+                "created_at": actor.get("createdAt") or member["created_at"],
+                "updated_at": actor.get("updatedAt") or member["updated_at"],
+                "deleted_at": actor.get("deletedAt") or member["deleted_at"],
+                "last_used": app_user.get("lastUsed") or app_user.get("last_used") or member["last_used"],
+            })
+            if "app-user" not in member["roles"]:
+                member["roles"].append("app-user")
+        for member in members.values():
+            member["roles"].sort()
+        inventory["current_project_users"] = sorted(
+            members.values(), key=lambda item: (item.get("display_name") or "", item["actor_id"])
+        )
         return inventory
 
     def _server_audit_start(self) -> str | None:

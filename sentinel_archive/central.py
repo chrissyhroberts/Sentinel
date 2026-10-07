@@ -166,6 +166,13 @@ class CentralClient:
         path = f"/v1/projects/{_quote(project_id)}/assignments/{_quote(role_id)}"
         return _items(self.get_json(path))
 
+    def app_users(self, project_id: str) -> list[dict[str, Any]]:
+        path = f"/v1/projects/{_quote(project_id)}/app-users"
+        return _items(self._request(
+            "GET", path, accept="application/json",
+            extra_headers={"X-Extended-Metadata": "true"},
+        ))
+
     def system_config(self, key: str) -> dict[str, Any]:
         return dict(self.get_json(f"/v1/config/{_quote(key)}"))
 

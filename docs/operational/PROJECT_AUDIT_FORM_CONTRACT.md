@@ -107,6 +107,12 @@ treating the data as complete. Neither claims to measure server disk space,
 uptime, CPU, memory or backups; those metrics belong to separately privileged
 Admin Sentinel.
 
+Its JSON includes a flattened `current_project_users` list with one entry per
+actor, grouped roles, account metadata, App User `last_used` where available,
+and an explicit login-history status. Web User `last_login` values require the
+privileged Central audit feed and are therefore not fabricated by the regular
+run.
+
 An explicitly invoked Admin Sentinel run creates one
 `admin_platform_snapshot` record. It uses the existing `platform_snapshot`,
 `platform_snapshot_pdf` and `evidence_package` attachment fields, so no
