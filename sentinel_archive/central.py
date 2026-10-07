@@ -66,7 +66,7 @@ class CentralClient:
             filename: (
                 filename,
                 data,
-                mimetypes.guess_type(filename)[0] or "application/octet-stream",
+                "application/octet-stream",
             )
             for filename, data in attachments.items()
         })
